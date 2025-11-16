@@ -24,12 +24,17 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
+      <head>
+        <script src="/lib/stockfish.js" async />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} bg-black text-zinc-100 antialiased`}
       >
         <header className="border-b border-white/10 bg-zinc-950/50">
           <div className="mx-auto max-w-7xl px-4 py-4">
-            <h1 className="text-2xl font-bold">♟️ ChessBop</h1>
+            <a href="/" className="text-2xl font-bold hover:text-blue-400 transition-colors">
+              ♟️ ChessBop
+            </a>
           </div>
         </header>
         <main className="min-h-[calc(100vh-73px)]">{children}</main>

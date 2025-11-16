@@ -1,33 +1,82 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ChessBoard from "@/components/ChessBoard";
+import { useEngine } from "@/core/engine";
+import EnginePanel from "@/components/analysis/EnginePanel";
 
 export default function AnalysisView() {
   const [boardKey, setBoardKey] = useState(0);
+  const [currentFen, setCurrentFen] = useState(
+    "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+  );
+  const [engineEnabled, setEngineEnabled] = useState(false);
+  const [analysisDepth, setAnalysisDepth] = useState(15);
 
-  const resetBoard = () => setBoardKey((k) => k + 1);
+  const { analysis, start, stop, analyze, isReady, isAnalyzing } = useEngine({
+    autoStart: false,
+    defaultOptions: { depth: analysisDepth, threads: 1, hash: 16 },
+  });
+
+  const resetBoard = () => {
+    setBoardKey((k) => k + 1);
+    setCurrentFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+  };
+
+  const handleMove = (fen: string) => {
+    setCurrentFen(fen);
+  };
+
+  const toggleEngine = async () => {
+    if (engineEnabled) {
+      stop();
+      setEngineEnabled(false);
+    } else {
+      await start();
+      setEngineEnabled(true);
+    }
+  };
+
+  // Analyze position when FEN changes and engine is enabled
+  useEffect(() => {
+    if (engineEnabled && isReady && currentFen) {
+      analyze(currentFen, { depth: analysisDepth });
+    }
+  }, [currentFen, engineEnabled, isReady, analysisDepth, analyze]);
+
+  // formatting now handled inside EnginePanel
 
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,700px)_minmax(260px,1fr)] lg:grid-cols-[minmax(0,800px)_minmax(320px,1fr)]">
       {/* Board area */}
       <section className="flex flex-col items-center gap-4">
         <div className="rounded-lg border border-white/10 bg-zinc-950/50 p-3">
-          {/* Fixed size for now; will be made responsive later */}
-          <ChessBoard key={boardKey} />
+          <ChessBoard key={boardKey} onMove={handleMove} />
         </div>
       </section>
 
       {/* Sidebar */}
       <aside className="flex min-h-[500px] flex-col gap-4">
-      <div className="rounded-lg border border-white/10 bg-zinc-950/50 p-4">
-          <h3 className="mb-2 text-sm font-semibold text-zinc-200">Engine</h3>
-          <div className="text-sm text-zinc-400">(engine)</div>
-        </div>
+        {/* Engine panel */}
+        <EnginePanel
+          engineEnabled={engineEnabled}
+          onToggle={toggleEngine}
+          analysis={analysis}
+          isAnalyzing={isAnalyzing}
+          analysisDepth={analysisDepth}
+          onChangeDepth={(d) => setAnalysisDepth(d)}
+        />
+
+        {/* Move List panel */}
         <div className="rounded-lg border border-white/10 bg-zinc-950/50 p-4">
-          <h3 className="mb-2 text-sm font-semibold text-zinc-200">Move List</h3>
-          <div className="h-72 overflow-auto text-sm text-zinc-400">(list)</div>
+          <h3 className="mb-2 text-sm font-semibold text-zinc-200">
+            Move List
+          </h3>
+          <div className="h-72 overflow-auto text-sm text-zinc-400">
+            (move list coming in Phase 4)
+          </div>
         </div>
+
         {/* Controls bar */}
         <div className="flex w-full items-center justify-between gap-2 rounded-lg border border-white/10 bg-zinc-950/50 p-3">
           <div className="text-sm text-zinc-400">Analysis controls</div>

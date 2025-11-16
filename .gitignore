@@ -1,0 +1,19 @@
+# ChessBop root gitignore
+extras/
+
+# Frontend build artifacts
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/node_modules/
+frontend/.DS_Store
+frontend/*.log
+frontend/.env*
+frontend/*.tsbuildinfo
+frontend/next-env.d.ts
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

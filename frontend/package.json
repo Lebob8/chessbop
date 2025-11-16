@@ -11,6 +11,8 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
+    "chess.js": "^1.4.0",
+    "chessground": "^9.2.1",
     "next": "16.0.3",
     "react": "19.2.0",
     "react-dom": "19.2.0"

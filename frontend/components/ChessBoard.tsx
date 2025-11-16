@@ -25,7 +25,7 @@ export default function ChessBoard({
     if (!boardRef.current) return;
 
     const cg = Chessground(boardRef.current, {
-      fen: initialFen,
+      fen: chess.fen(),
       orientation,
       movable: {
         free: false,

@@ -44,6 +44,7 @@ export class StockfishWorker {
   private queue = new Queue<string>();
   private messageListener: ((line: string) => void) | null = null;
   private infoCallback: ((evaluation: EngineEvaluation) => void) | null = null;
+  private currentFen: string = "";
 
   /**
    * Initialize the Stockfish engine
@@ -71,7 +72,7 @@ export class StockfishWorker {
 
       // Parse info lines for live updates
       if (line.startsWith("info") && this.infoCallback) {
-        const evaluation = this.parseInfoLine(line);
+        const evaluation = this.parseInfoLine(line, this.currentFen);
         if (evaluation) {
           this.infoCallback(evaluation);
         }
@@ -119,6 +120,7 @@ export class StockfishWorker {
     onInfo?: (evaluation: EngineEvaluation) => void
   ): Promise<EngineEvaluation> {
     this.infoCallback = onInfo || null;
+    this.currentFen = fen;
 
     // Set position
     this.send(`position fen ${fen}`);
@@ -144,7 +146,7 @@ export class StockfishWorker {
     let bestEval: EngineEvaluation | null = null;
     for (const line of lines) {
       if (line.startsWith("info")) {
-        const evaluation = this.parseInfoLine(line);
+        const evaluation = this.parseInfoLine(line, fen);
         if (evaluation && evaluation.pv.length > 0) {
           bestEval = evaluation;
         }
@@ -221,8 +223,9 @@ export class StockfishWorker {
   /**
    * Parse UCI info line into evaluation object
    * Example: info depth 20 seldepth 25 multipv 1 score cp 25 nodes 123456 nps 50000 time 2468 pv e2e4 e7e5
+   * Note: Stockfish reports scores from side-to-move perspective, we convert to white's perspective
    */
-  private parseInfoLine(line: string): EngineEvaluation | null {
+  private parseInfoLine(line: string, fen: string = ""): EngineEvaluation | null {
     const tokens = line.split(" ");
 
     // Must have depth and score
@@ -238,7 +241,15 @@ export class StockfishWorker {
 
     // Parse score (cp or mate)
     const scoreType = tokens[scoreIdx + 1]; // "cp" or "mate"
-    const scoreValue = parseInt(tokens[scoreIdx + 2], 10);
+    let scoreValue = parseInt(tokens[scoreIdx + 2], 10);
+    
+    // Stockfish reports from side-to-move perspective, convert to white's perspective
+    // FEN format: "... w ..." (white) or "... b ..." (black)
+    const isBlackToMove = fen.split(" ")[1] === "b";
+    if (isBlackToMove) {
+      scoreValue = -scoreValue; // Flip sign for black's perspective
+    }
+    
     const cp = scoreType === "cp" ? scoreValue : undefined;
     const mate = scoreType === "mate" ? scoreValue : undefined;
 

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ChessBoard from "@/components/ChessBoard";
 import { useEngine } from "@/core/engine";
+import { Chess } from "chess.js";
 import { EvalBar } from "@/components/analysis/EvalBar";
 import EnginePanel from "@/components/analysis/EnginePanel";
 import { MoveListTree } from "../MoveListTree";
@@ -92,20 +93,57 @@ export default function AnalysisView() {
     setTreeVersion((v) => v + 1);
   };
 
-  // Analyze position when FEN changes and engine is enabled
+  // Analyze position when FEN changes and engine is enabled (skip terminal positions)
   useEffect(() => {
-    if (engineEnabled && isReady && currentFen) {
-      analyze(currentFen, { depth: analysisDepth });
-    }
+    if (!engineEnabled || !isReady || !currentFen) return;
+    const c = new Chess(currentFen);
+    if (c.isGameOver()) return; // avoid analyzing checkmate/stalemate positions
+    analyze(currentFen, { depth: analysisDepth });
   }, [currentFen, engineEnabled, isReady, analysisDepth, analyze, treeVersion]);
 
+  // Game over banner message
+  const gameOverInfo = useMemo(() => {
+    try {
+      const c = new Chess(currentFen);
+      if (!c.isGameOver()) return null;
+      if (c.isCheckmate()) {
+        const winner = c.turn() === "w" ? "Black" : "White";
+        return { label: `Checkmate — ${winner} wins` };
+      }
+      if (c.isStalemate()) return { label: "Draw — stalemate" };
+      if (c.isInsufficientMaterial()) return { label: "Draw — insufficient material" };
+      if (c.isDraw()) return { label: "Draw" };
+      return { label: "Game over" };
+    } catch {
+      return null;
+    }
+  }, [currentFen]);
 
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,700px)_minmax(260px,1fr)] lg:grid-cols-[minmax(0,800px)_minmax(320px,1fr)]">
       {/* Board area */}
       <section className="flex items-start gap-1">
         <div className="rounded-lg border border-white/10 bg-zinc-950/50 p-3">
-          <ChessBoard key={boardKey} initialFen={currentFen} onMove={handleMove} onMoveDetail={handleMoveDetail} orientation={orientation} />
+          <ChessBoard 
+            key={boardKey} 
+            initialFen={currentFen} 
+            onMove={handleMove} 
+            onMoveDetail={handleMoveDetail} 
+            orientation={orientation}
+            lastMove={gameTree.getCurrent().move ? [gameTree.getCurrent().move!.from, gameTree.getCurrent().move!.to] : undefined}
+          />
+          {gameOverInfo && (
+            <div className="mt-3 flex items-center justify-between rounded-md border border-white/10 bg-zinc-900 px-3 py-2 text-sm text-zinc-200">
+              <span>{gameOverInfo.label}</span>
+              <button
+                type="button"
+                onClick={resetBoard}
+                className="rounded-md border border-white/10 bg-zinc-800 px-2 py-1 text-xs hover:bg-zinc-700"
+              >
+                New Game
+              </button>
+            </div>
+          )}
         </div>
         {/* Vertical evaluation bar (hidden on small screens) */}
         <div className="hidden md:block">

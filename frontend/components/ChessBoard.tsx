@@ -11,6 +11,7 @@ interface ChessBoardProps {
   orientation?: "white" | "black";
   onMove?: (fen: string) => void;
   onMoveDetail?: (info: { fen: string; san: string; color: "w" | "b"; from: string; to: string }) => void;
+  lastMove?: [string, string];
 }
 
 export default function ChessBoard({
@@ -18,6 +19,7 @@ export default function ChessBoard({
   orientation = "white",
   onMove,
   onMoveDetail,
+  lastMove,
 }: ChessBoardProps) {
   const boardRef = useRef<HTMLDivElement>(null);
   const cgRef = useRef<Api | null>(null);
@@ -29,6 +31,15 @@ export default function ChessBoard({
     const cg = Chessground(boardRef.current, {
       fen: chess.fen(),
       orientation,
+      lastMove: lastMove ? [lastMove[0] as Key, lastMove[1] as Key] : undefined,
+      highlight: {
+        lastMove: true,
+        check: true,
+      },
+      animation: {
+        enabled: true,
+        duration: 180,
+      },
       movable: {
         free: false,
         color: "both",
@@ -50,6 +61,7 @@ export default function ChessBoard({
             cg.set({
               fen: chess.fen(),
               turnColor: toColor(chess),
+              lastMove: [orig, dest],
               movable: {
                 color: toColor(chess),
                 dests: toDests(chess),
@@ -71,7 +83,39 @@ export default function ChessBoard({
     return () => {
       cg.destroy();
     };
-  }, [chess, initialFen, orientation, onMove, onMoveDetail]);
+  }, [orientation, onMove, onMoveDetail, lastMove]);
+
+  // Update board position when initialFen changes without re-initializing Chessground
+  useEffect(() => {
+    if (!cgRef.current) return;
+    if (!initialFen) return;
+
+    if (initialFen !== chess.fen()) {
+      try {
+        chess.load(initialFen);
+        cgRef.current.set({
+          fen: chess.fen(),
+          turnColor: toColor(chess),
+          animation: { enabled: true, duration: 180 },
+          lastMove: lastMove ? [lastMove[0] as Key, lastMove[1] as Key] : undefined,
+          movable: {
+            color: toColor(chess),
+            dests: toDests(chess),
+          },
+        });
+      } catch (_e) {
+        // ignore invalid FEN loads
+      }
+    }
+  }, [initialFen, chess, lastMove]);
+
+  // Update lastMove highlighting independently when it changes
+  useEffect(() => {
+    if (!cgRef.current) return;
+    cgRef.current.set({
+      lastMove: lastMove ? [lastMove[0] as Key, lastMove[1] as Key] : undefined,
+    });
+  }, [lastMove]);
 
   return (
     <div className="relative inline-block">

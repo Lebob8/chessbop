@@ -10,7 +10,7 @@ interface ChessBoardProps {
   initialFen?: string;
   orientation?: "white" | "black";
   onMove?: (fen: string) => void;
-  onMoveDetail?: (info: { fen: string; san: string; color: "w" | "b" }) => void;
+  onMoveDetail?: (info: { fen: string; san: string; color: "w" | "b"; from: string; to: string }) => void;
 }
 
 export default function ChessBoard({
@@ -57,7 +57,7 @@ export default function ChessBoard({
             });
             onMove?.(chess.fen());
             if (move && onMoveDetail) {
-              onMoveDetail({ fen: chess.fen(), san: move.san, color: move.color as "w" | "b" });
+              onMoveDetail({ fen: chess.fen(), san: move.san, color: move.color as "w" | "b", from: move.from, to: move.to });
             }
           } else {
             cg.set({ fen: chess.fen() });

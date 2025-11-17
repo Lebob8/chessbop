@@ -5,16 +5,18 @@ import ChessBoard from "@/components/ChessBoard";
 import { useEngine } from "@/core/engine";
 import { EvalBar } from "@/components/analysis/EvalBar";
 import EnginePanel from "@/components/analysis/EnginePanel";
-import { MoveList } from "@/components/MoveList";
+import { MoveListTree } from "../MoveListTree";
 import { Controls } from "@/components/Controls";
+import { VariationControls } from "../VariationControls";
+import { GameTree } from "@/core/chess";
+import type { Move } from "@/core/chess";
 
 export default function AnalysisView() {
   const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+  const [gameTree] = useState(() => new GameTree(START_FEN));
   const [boardKey, setBoardKey] = useState(0);
   const [currentFen, setCurrentFen] = useState(START_FEN);
-  const [fenHistory, setFenHistory] = useState<string[]>([START_FEN]);
-  const [moves, setMoves] = useState<Array<{ san: string; color: "w" | "b" }>>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [treeVersion, setTreeVersion] = useState(0); // Trigger re-renders on tree changes
   const [engineEnabled, setEngineEnabled] = useState(true);
   const [analysisDepth, setAnalysisDepth] = useState(15);
   const [orientation, setOrientation] = useState<"white" | "black">("white");
@@ -25,29 +27,28 @@ export default function AnalysisView() {
   });
 
   const resetBoard = () => {
+    gameTree.reset(START_FEN);
     setBoardKey((k) => k + 1);
     setCurrentFen(START_FEN);
-    setFenHistory([START_FEN]);
-    setMoves([]);
-    setCurrentIndex(0);
+    setTreeVersion((v) => v + 1);
   };
 
   const handleMove = (fen: string) => {
     setCurrentFen(fen);
   };
 
-  const handleMoveDetail = (info: { fen: string; san: string; color: "w" | "b" }) => {
-    // If we've navigated back in history, truncate future moves
-    const baseFenHistory = fenHistory.slice(0, currentIndex + 1);
-    const baseMoves = moves.slice(0, currentIndex);
-
-    const nextMoves = [...baseMoves, { san: info.san, color: info.color }];
-    const nextFenHistory = [...baseFenHistory, info.fen];
-
-    setMoves(nextMoves);
-    setFenHistory(nextFenHistory);
+  const handleMoveDetail = (info: { fen: string; san: string; color: "w" | "b"; from: string; to: string }) => {
+    const move: Move = {
+      san: info.san,
+      from: info.from,
+      to: info.to,
+      color: info.color,
+    };
+    
+    // GameTree.addMove auto-handles variations vs following existing moves
+    gameTree.addMove(move, info.fen);
     setCurrentFen(info.fen);
-    setCurrentIndex(nextMoves.length);
+    setTreeVersion((v) => v + 1);
   };
 
   const toggleEngine = async () => {
@@ -62,34 +63,33 @@ export default function AnalysisView() {
 
   // Navigation handlers
   const goToStart = () => {
-    setCurrentIndex(0);
-    setCurrentFen(START_FEN);
+    gameTree.goToStart();
+    setCurrentFen(gameTree.getCurrent().fen);
     setBoardKey((k) => k + 1);
+    setTreeVersion((v) => v + 1);
   };
 
   const goToPrev = () => {
-    if (currentIndex > 0) {
-      const prevIdx = currentIndex - 1;
-      setCurrentIndex(prevIdx);
-      setCurrentFen(fenHistory[prevIdx] ?? START_FEN);
+    if (gameTree.goBack()) {
+      setCurrentFen(gameTree.getCurrent().fen);
       setBoardKey((k) => k + 1);
+      setTreeVersion((v) => v + 1);
     }
   };
 
   const goToNext = () => {
-    if (currentIndex < moves.length) {
-      const nextIdx = currentIndex + 1;
-      setCurrentIndex(nextIdx);
-      setCurrentFen(fenHistory[nextIdx] ?? START_FEN);
+    if (gameTree.goForward()) {
+      setCurrentFen(gameTree.getCurrent().fen);
       setBoardKey((k) => k + 1);
+      setTreeVersion((v) => v + 1);
     }
   };
 
   const goToEnd = () => {
-    const lastIdx = moves.length;
-    setCurrentIndex(lastIdx);
-    setCurrentFen(fenHistory[lastIdx] ?? START_FEN);
+    gameTree.goToEnd();
+    setCurrentFen(gameTree.getCurrent().fen);
     setBoardKey((k) => k + 1);
+    setTreeVersion((v) => v + 1);
   };
 
   // Analyze position when FEN changes and engine is enabled
@@ -97,14 +97,13 @@ export default function AnalysisView() {
     if (engineEnabled && isReady && currentFen) {
       analyze(currentFen, { depth: analysisDepth });
     }
-  }, [currentFen, engineEnabled, isReady, analysisDepth, analyze]);
+  }, [currentFen, engineEnabled, isReady, analysisDepth, analyze, treeVersion]);
 
-  // formatting now handled inside EnginePanel
 
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,700px)_minmax(260px,1fr)] lg:grid-cols-[minmax(0,800px)_minmax(320px,1fr)]">
       {/* Board area */}
-      <section className="flex items-start gap-3">
+      <section className="flex items-start gap-1">
         <div className="rounded-lg border border-white/10 bg-zinc-950/50 p-3">
           <ChessBoard key={boardKey} initialFen={currentFen} onMove={handleMove} onMoveDetail={handleMoveDetail} orientation={orientation} />
         </div>
@@ -149,15 +148,16 @@ export default function AnalysisView() {
             Move List
           </h3>
           <div className="h-72">
-            <MoveList
-              moves={moves}
-              currentIndex={currentIndex}
-              onMoveClick={(idx) => {
-                // idx represents the position after that ply; 0 = start
-                const targetFen = fenHistory[idx] ?? START_FEN;
-                setCurrentIndex(idx);
-                setCurrentFen(targetFen);
-                setBoardKey((k) => k + 1); // re-init board at selected position
+            <MoveListTree
+              rootNode={gameTree.getRoot()}
+              currentNode={gameTree.getCurrent()}
+              treeVersion={treeVersion}
+              onNodeClick={(nodeId) => {
+                if (gameTree.setCurrentById(nodeId)) {
+                  setCurrentFen(gameTree.getCurrent().fen);
+                  setBoardKey((k) => k + 1);
+                  setTreeVersion((v) => v + 1);
+                }
               }}
             />
           </div>
@@ -167,8 +167,8 @@ export default function AnalysisView() {
         <div className="flex w-full flex-col gap-3 rounded-lg border border-white/10 bg-zinc-950/50 p-3">
           <Controls
             state={{ phase: isAnalyzing ? 'analyzing' : 'idle' }}
-            positionIndex={currentIndex}
-            total={moves.length}
+            positionIndex={!gameTree.getCurrent().parent ? 0 : 1}
+            total={gameTree.getCurrent().children.length > 0 ? 2 : 1}
             onReset={goToStart}
             onPrev={goToPrev}
             onNext={goToNext}
@@ -177,6 +177,20 @@ export default function AnalysisView() {
             onPause={() => {}}
             onResume={() => {}}
           />
+        </div>
+
+        {/* Variation Controls */}
+        <VariationControls
+          key={treeVersion}
+          gameTree={gameTree}
+          onTreeChange={() => {
+            setCurrentFen(gameTree.getCurrent().fen);
+            setBoardKey((k) => k + 1);
+            setTreeVersion((v) => v + 1);
+          }}
+        />
+
+        <div className="flex w-full flex-col gap-3 rounded-lg border border-white/10 bg-zinc-950/50 p-3">
           {/* Settings row */}
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">

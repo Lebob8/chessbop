@@ -10,12 +10,14 @@ interface ChessBoardProps {
   initialFen?: string;
   orientation?: "white" | "black";
   onMove?: (fen: string) => void;
+  onMoveDetail?: (info: { fen: string; san: string; color: "w" | "b" }) => void;
 }
 
 export default function ChessBoard({
   initialFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
   orientation = "white",
   onMove,
+  onMoveDetail,
 }: ChessBoardProps) {
   const boardRef = useRef<HTMLDivElement>(null);
   const cgRef = useRef<Api | null>(null);
@@ -54,6 +56,9 @@ export default function ChessBoard({
               },
             });
             onMove?.(chess.fen());
+            if (move && onMoveDetail) {
+              onMoveDetail({ fen: chess.fen(), san: move.san, color: move.color as "w" | "b" });
+            }
           } else {
             cg.set({ fen: chess.fen() });
           }
@@ -66,7 +71,7 @@ export default function ChessBoard({
     return () => {
       cg.destroy();
     };
-  }, [chess, initialFen, orientation, onMove]);
+  }, [chess, initialFen, orientation, onMove, onMoveDetail]);
 
   return (
     <div className="relative inline-block">

@@ -5,12 +5,16 @@ import ChessBoard from "@/components/ChessBoard";
 import { useEngine } from "@/core/engine";
 import { EvalBar } from "@/components/analysis/EvalBar";
 import EnginePanel from "@/components/analysis/EnginePanel";
+import { MoveList } from "@/components/MoveList";
+import { Controls } from "@/components/Controls";
 
 export default function AnalysisView() {
+  const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
   const [boardKey, setBoardKey] = useState(0);
-  const [currentFen, setCurrentFen] = useState(
-    "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-  );
+  const [currentFen, setCurrentFen] = useState(START_FEN);
+  const [fenHistory, setFenHistory] = useState<string[]>([START_FEN]);
+  const [moves, setMoves] = useState<Array<{ san: string; color: "w" | "b" }>>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
   const [engineEnabled, setEngineEnabled] = useState(true);
   const [analysisDepth, setAnalysisDepth] = useState(15);
   const [orientation, setOrientation] = useState<"white" | "black">("white");
@@ -22,11 +26,28 @@ export default function AnalysisView() {
 
   const resetBoard = () => {
     setBoardKey((k) => k + 1);
-    setCurrentFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    setCurrentFen(START_FEN);
+    setFenHistory([START_FEN]);
+    setMoves([]);
+    setCurrentIndex(0);
   };
 
   const handleMove = (fen: string) => {
     setCurrentFen(fen);
+  };
+
+  const handleMoveDetail = (info: { fen: string; san: string; color: "w" | "b" }) => {
+    // If we've navigated back in history, truncate future moves
+    const baseFenHistory = fenHistory.slice(0, currentIndex + 1);
+    const baseMoves = moves.slice(0, currentIndex);
+
+    const nextMoves = [...baseMoves, { san: info.san, color: info.color }];
+    const nextFenHistory = [...baseFenHistory, info.fen];
+
+    setMoves(nextMoves);
+    setFenHistory(nextFenHistory);
+    setCurrentFen(info.fen);
+    setCurrentIndex(nextMoves.length);
   };
 
   const toggleEngine = async () => {
@@ -37,6 +58,38 @@ export default function AnalysisView() {
       await start();
       setEngineEnabled(true);
     }
+  };
+
+  // Navigation handlers
+  const goToStart = () => {
+    setCurrentIndex(0);
+    setCurrentFen(START_FEN);
+    setBoardKey((k) => k + 1);
+  };
+
+  const goToPrev = () => {
+    if (currentIndex > 0) {
+      const prevIdx = currentIndex - 1;
+      setCurrentIndex(prevIdx);
+      setCurrentFen(fenHistory[prevIdx] ?? START_FEN);
+      setBoardKey((k) => k + 1);
+    }
+  };
+
+  const goToNext = () => {
+    if (currentIndex < moves.length) {
+      const nextIdx = currentIndex + 1;
+      setCurrentIndex(nextIdx);
+      setCurrentFen(fenHistory[nextIdx] ?? START_FEN);
+      setBoardKey((k) => k + 1);
+    }
+  };
+
+  const goToEnd = () => {
+    const lastIdx = moves.length;
+    setCurrentIndex(lastIdx);
+    setCurrentFen(fenHistory[lastIdx] ?? START_FEN);
+    setBoardKey((k) => k + 1);
   };
 
   // Analyze position when FEN changes and engine is enabled
@@ -53,7 +106,7 @@ export default function AnalysisView() {
       {/* Board area */}
       <section className="flex items-start gap-3">
         <div className="rounded-lg border border-white/10 bg-zinc-950/50 p-3">
-          <ChessBoard key={boardKey} onMove={handleMove} orientation={orientation} />
+          <ChessBoard key={boardKey} initialFen={currentFen} onMove={handleMove} onMoveDetail={handleMoveDetail} orientation={orientation} />
         </div>
         {/* Vertical evaluation bar (hidden on small screens) */}
         <div className="hidden md:block">
@@ -95,27 +148,51 @@ export default function AnalysisView() {
           <h3 className="mb-2 text-sm font-semibold text-zinc-200">
             Move List
           </h3>
-          <div className="h-72 overflow-auto text-sm text-zinc-400">
-            (move list coming in Phase 4)
+          <div className="h-72">
+            <MoveList
+              moves={moves}
+              currentIndex={currentIndex}
+              onMoveClick={(idx) => {
+                // idx represents the position after that ply; 0 = start
+                const targetFen = fenHistory[idx] ?? START_FEN;
+                setCurrentIndex(idx);
+                setCurrentFen(targetFen);
+                setBoardKey((k) => k + 1); // re-init board at selected position
+              }}
+            />
           </div>
         </div>
 
         {/* Controls bar */}
-        <div className="flex w-full items-center justify-between gap-2 rounded-lg border border-white/10 bg-zinc-950/50 p-3">
-          <div className="text-sm text-zinc-400">Analysis controls</div>
-          <div className="flex items-center gap-2">
-            <label htmlFor="board-side" className="text-xs text-zinc-400">
-              Side
-            </label>
-            <select
-              id="board-side"
-              value={orientation}
-              onChange={(e) => setOrientation(e.target.value as "white" | "black")}
-              className="rounded border border-white/10 bg-zinc-900 px-2 py-1 text-xs text-zinc-300"
-            >
-              <option value="white">White</option>
-              <option value="black">Black</option>
-            </select>
+        <div className="flex w-full flex-col gap-3 rounded-lg border border-white/10 bg-zinc-950/50 p-3">
+          <Controls
+            state={{ phase: isAnalyzing ? 'analyzing' : 'idle' }}
+            positionIndex={currentIndex}
+            total={moves.length}
+            onReset={goToStart}
+            onPrev={goToPrev}
+            onNext={goToNext}
+            onLast={goToEnd}
+            onAnalyzeAll={() => {}}
+            onPause={() => {}}
+            onResume={() => {}}
+          />
+          {/* Settings row */}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <label htmlFor="board-side" className="text-xs text-zinc-400">
+                Side
+              </label>
+              <select
+                id="board-side"
+                value={orientation}
+                onChange={(e) => setOrientation(e.target.value as "white" | "black")}
+                className="rounded border border-white/10 bg-zinc-900 px-2 py-1 text-xs text-zinc-300"
+              >
+                <option value="white">White</option>
+                <option value="black">Black</option>
+              </select>
+            </div>
             <button
               type="button"
               onClick={resetBoard}

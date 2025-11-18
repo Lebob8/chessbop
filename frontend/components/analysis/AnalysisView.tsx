@@ -37,6 +37,11 @@ export default function AnalysisView() {
     "easy" | "medium" | "hard" | "very-hard"
   >("medium");
   const [showEngineTurnArrows, setShowEngineTurnArrows] = useState(false);
+  const [fenInput, setFenInput] = useState("");
+  const [fenError, setFenError] = useState<string | null>(null);
+  const [pgnInput, setPgnInput] = useState("");
+  const [pgnError, setPgnError] = useState<string | null>(null);
+  const [pgnExport, setPgnExport] = useState("");
 
   const opponentRef = useRef<OpponentEngine | null>(null);
   const mountedRef = useRef(true);
@@ -114,6 +119,49 @@ export default function AnalysisView() {
     hintPulse: 0,
     showEngineTurnArrows,
   });
+
+  // Keep FEN input prefilled with the current position
+  useEffect(() => {
+    setFenInput(currentFen);
+    setFenError(null);
+  }, [currentFen, setFenInput, setFenError]);
+
+  // Rebuild PGN export whenever the main line changes
+  useEffect(() => {
+    try {
+      const mainLine = gameTree.getMainLine();
+      if (!mainLine.length) {
+        setPgnExport("");
+        return;
+      }
+      const root = mainLine[0];
+      const rootFen = root.fen;
+      const chessForPgn = new Chess(rootFen);
+      if (rootFen !== START_FEN) {
+        chessForPgn.header("SetUp", "1");
+        chessForPgn.header("FEN", rootFen);
+      }
+      for (let i = 1; i < mainLine.length; i += 1) {
+        const mv = mainLine[i].move;
+        if (!mv) continue;
+        chessForPgn.move({
+          from: mv.from,
+          to: mv.to,
+          promotion: mv.promotion,
+        });
+      }
+      const pgn = chessForPgn.pgn();
+      setPgnExport(pgn);
+    } catch {
+      setPgnExport("");
+    }
+  }, [gameTree, treeVersion, setPgnExport]);
+
+  // Keep FEN input prefilled with the current position
+  useEffect(() => {
+    setFenInput(currentFen);
+    setFenError(null);
+  }, [currentFen]);
 
   // Initialize opponent engine on mount
   useEffect(() => {
@@ -380,9 +428,82 @@ export default function AnalysisView() {
   useEffect(() => {
     if (!engineEnabled || !isReady || !currentFen) return;
     const c = new Chess(currentFen);
-    if (c.isGameOver()) return; // avoid analyzing checkmate/stalemate positions
-    analyze(currentFen, { depth: analysisDepth });
-  }, [currentFen, engineEnabled, isReady, analysisDepth, analyze, treeVersion]);
+      if (c.isGameOver()) return; // avoid analyzing checkmate/stalemate positions
+      analyze(currentFen, { depth: analysisDepth });
+    }, [currentFen, engineEnabled, isReady, analysisDepth, analyze, treeVersion]);
+
+  const handleLoadFen = () => {
+    const raw = fenInput.trim();
+    if (!raw) {
+      setFenError("Please paste a FEN string.");
+      return;
+    }
+    try {
+      const c = new Chess(raw);
+      const normalizedFen = c.fen();
+      gameTree.reset(normalizedFen);
+      setCurrentFen(normalizedFen);
+      setBoardKey((k) => k + 1);
+      setTreeVersion((v) => v + 1);
+      lastEngineRequestRef.current = null;
+      setFenError(null);
+    } catch {
+      setFenError("Invalid FEN: please check the string and try again.");
+    }
+  };
+
+  const handleLoadPgn = () => {
+    const raw = pgnInput.trim();
+    if (!raw) {
+      setPgnError("Please paste a PGN string.");
+      return;
+    }
+    try {
+      const chessFromPgn = new Chess();
+      // chess.js v1 exposes `loadPgn`; it throws on invalid PGN
+      (chessFromPgn as unknown as { loadPgn: (pgn: string) => void }).loadPgn(raw);
+
+      const headers = chessFromPgn.header();
+      const headerFen = (headers as Record<string, string | undefined>).FEN;
+      const headerSetUp = (headers as Record<string, string | undefined>).SetUp;
+      const startFen = headerSetUp === "1" && headerFen ? headerFen : START_FEN;
+
+      const chessReplay = new Chess(startFen);
+      gameTree.reset(startFen);
+
+      const moves = chessFromPgn.history({ verbose: true }) as Array<{
+        san: string;
+        from: string;
+        to: string;
+        color: "w" | "b";
+        promotion?: string;
+      }>;
+
+      for (const mv of moves) {
+        chessReplay.move({
+          from: mv.from,
+          to: mv.to,
+          promotion: mv.promotion,
+        });
+        const moveData: Move = {
+          san: mv.san,
+          from: mv.from,
+          to: mv.to,
+          color: mv.color,
+          promotion: mv.promotion as "q" | "r" | "b" | "n" | undefined,
+        };
+        gameTree.addMove(moveData, chessReplay.fen());
+      }
+
+      setCurrentFen(chessReplay.fen());
+      setBoardKey((k) => k + 1);
+      setTreeVersion((v) => v + 1);
+      lastEngineRequestRef.current = null;
+      setPgnError(null);
+    } catch {
+      setPgnError("Invalid PGN: please check the string and try again.");
+    }
+  };
 
   // Game over banner message
   const gameOverInfo = useMemo(() => {
@@ -603,6 +724,119 @@ export default function AnalysisView() {
                 )}
               </div>
             )}
+          </div>
+          {/* FEN import/export */}
+          <div className="mt-3 space-y-2">
+            <div className="space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-zinc-400">Current FEN</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(currentFen);
+                  }}
+                  className="rounded border border-white/10 bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-200 hover:bg-zinc-700"
+                >
+                  Copy
+                </button>
+              </div>
+              <textarea
+                className="w-full resize-none rounded border border-white/10 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-300"
+                rows={2}
+                value={currentFen}
+                readOnly
+              />
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-zinc-400">Load FEN</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFenInput("");
+                    setFenError(null);
+                  }}
+                  className="rounded border border-white/10 bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-200 hover:bg-zinc-700"
+                >
+                  Clear
+                </button>
+              </div>
+              <textarea
+                className="w-full resize-none rounded border border-white/10 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-300"
+                rows={2}
+                value={fenInput}
+                onChange={(e) => setFenInput(e.target.value)}
+                placeholder="Paste FEN here and click Load"
+              />
+              {fenError && (
+                <div className="text-[11px] text-red-400">{fenError}</div>
+              )}
+              <button
+                type="button"
+                onClick={handleLoadFen}
+                className="rounded-md border border-white/10 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-800"
+              >
+                Load FEN into analysis
+              </button>
+            </div>
+          </div>
+
+          {/* PGN import/export */}
+          <div className="mt-4 space-y-2">
+            <div className="space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-zinc-400">Current PGN (main line)</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(pgnExport);
+                  }}
+                  className="rounded border border-white/10 bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-200 hover:bg-zinc-700"
+                >
+                  Copy
+                </button>
+              </div>
+              <textarea
+                className="w-full resize-none rounded border border-white/10 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-300"
+                rows={4}
+                value={pgnExport}
+                readOnly
+              />
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-zinc-400">Load PGN</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPgnInput("");
+                    setPgnError(null);
+                  }}
+                  className="rounded border border-white/10 bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-200 hover:bg-zinc-700"
+                >
+                  Clear
+                </button>
+              </div>
+              <textarea
+                className="w-full resize-none rounded border border-white/10 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-300"
+                rows={4}
+                value={pgnInput}
+                onChange={(e) => setPgnInput(e.target.value)}
+                placeholder="Paste PGN here and click Load"
+              />
+              {pgnError && (
+                <div className="text-[11px] text-red-400">{pgnError}</div>
+              )}
+              <button
+                type="button"
+                onClick={handleLoadPgn}
+                className="rounded-md border border-white/10 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-800"
+              >
+                Load PGN into analysis
+              </button>
+            </div>
           </div>
         </div>
       </aside>

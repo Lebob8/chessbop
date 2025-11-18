@@ -1,2 +1,2 @@
 export { GameTree } from "./GameTree";
-export type { GameNode, Move } from "./types";
+export type { GameNode, Move, BoardArrow } from "./types";

@@ -33,3 +33,9 @@ export interface GameNode {
   /** Move number (full moves, starts at 1) */
   moveNumber: number;
 }
+
+export interface BoardArrow {
+  startSquare: string;
+  endSquare: string;
+  color?: string;
+}

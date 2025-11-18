@@ -45,6 +45,7 @@ export class StockfishWorker {
   private messageListener: ((line: string) => void) | null = null;
   private infoCallback: ((evaluation: EngineEvaluation) => void) | null = null;
   private currentFen: string = "";
+  private lastInfoAt = 0;
 
   /**
    * Initialize the Stockfish engine
@@ -70,8 +71,15 @@ export class StockfishWorker {
     this.messageListener = (line: string) => {
       this.queue.put(line);
 
-      // Parse info lines for live updates
+      // Parse info lines for live updates with basic throttling
       if (line.startsWith("info") && this.infoCallback) {
+        const now = Date.now();
+        const shouldEmit = now - this.lastInfoAt >= 100;
+        if (!shouldEmit) {
+          return;
+        }
+        this.lastInfoAt = now;
+
         const evaluation = this.parseInfoLine(line, this.currentFen);
         if (evaluation) {
           this.infoCallback(evaluation);
@@ -112,6 +120,34 @@ export class StockfishWorker {
   }
 
   /**
+   * Set a single UCI option and wait for the engine to be ready.
+   * Example: setOption("UCI_LimitStrength", true)
+   */
+  async setOption(
+    name: string,
+    value: string | number | boolean
+  ): Promise<void> {
+    const valStr = String(value);
+    this.send(`setoption name ${name} value ${valStr}`);
+    this.send("isready");
+    await this.receiveUntil((line) => line === "readyok");
+  }
+
+  /**
+   * Set multiple UCI options in a batch, then wait for readiness once.
+   */
+  async setOptions(
+    options: Record<string, string | number | boolean>
+  ): Promise<void> {
+    for (const [name, value] of Object.entries(options)) {
+      const valStr = String(value);
+      this.send(`setoption name ${name} value ${valStr}`);
+    }
+    this.send("isready");
+    await this.receiveUntil((line) => line === "readyok");
+  }
+
+  /**
    * Analyze a position
    */
   async analyze(
@@ -119,6 +155,9 @@ export class StockfishWorker {
     options: EngineOptions = {},
     onInfo?: (evaluation: EngineEvaluation) => void
   ): Promise<EngineEvaluation> {
+    // Stop any previous search before starting a new one
+    this.stop();
+
     this.infoCallback = onInfo || null;
     this.currentFen = fen;
 
@@ -128,7 +167,7 @@ export class StockfishWorker {
     await this.receiveUntil((line) => line === "readyok");
 
     // Start search
-    const { depth, movetime } = options;
+      const { depth, movetime } = options;
     let goCommand = "go";
     if (depth) {
       goCommand += ` depth ${depth}`;

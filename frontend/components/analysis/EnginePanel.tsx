@@ -9,6 +9,9 @@ interface EnginePanelProps {
   isAnalyzing: boolean;
   analysisDepth: number;
   onChangeDepth: (depth: number) => void;
+  showBestMove: boolean;
+  onToggleBestMove: () => void;
+  bestMoveLabel?: string;
 }
 
 export default function EnginePanel({
@@ -18,6 +21,9 @@ export default function EnginePanel({
   isAnalyzing,
   analysisDepth,
   onChangeDepth,
+  showBestMove,
+  onToggleBestMove,
+  bestMoveLabel,
 }: EnginePanelProps) {
   const formatEval = () => {
     if (!analysis.evaluation) return "—";
@@ -107,23 +113,49 @@ export default function EnginePanel({
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <label htmlFor="depth-select" className="text-xs text-zinc-400">
-          Depth:
-        </label>
-        <select
-          id="depth-select"
-          value={analysisDepth}
-          onChange={(e) => onChangeDepth(Number(e.target.value))}
-          className="rounded border border-white/10 bg-zinc-900 px-2 py-1 text-xs text-zinc-300"
-          disabled={!engineEnabled}
-        >
-          <option value={10}>Fast (10)</option>
-          <option value={15}>Normal (15)</option>
-          <option value={20}>Deep (20)</option>
-          <option value={25}>Very Deep (25)</option>
-        </select>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <label htmlFor="depth-select" className="text-xs text-zinc-400">
+            Depth:
+          </label>
+          <select
+            id="depth-select"
+            value={analysisDepth}
+            onChange={(e) => onChangeDepth(Number(e.target.value))}
+            className="rounded border border-white/10 bg-zinc-900 px-2 py-1 text-xs text-zinc-300"
+            disabled={!engineEnabled}
+          >
+            <option value={10}>Fast (10)</option>
+            <option value={15}>Normal (15)</option>
+            <option value={20}>Deep (20)</option>
+            <option value={25}>Very Deep (25)</option>
+          </select>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-zinc-400">Show best move</span>
+          <button
+            type="button"
+            onClick={onToggleBestMove}
+            className={`rounded px-2 py-1 text-xs font-medium transition ${
+              showBestMove
+                ? "bg-blue-600 text-white hover:bg-blue-700"
+                : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+            } ${!engineEnabled ? "cursor-not-allowed opacity-60" : ""}`}
+            aria-pressed={showBestMove}
+            disabled={!engineEnabled}
+          >
+            {showBestMove ? "ON" : "OFF"}
+          </button>
+        </div>
       </div>
+      {showBestMove && (
+        <div className="mt-2 text-xs text-zinc-200">
+          Best move:{" "}
+          <span className="font-mono text-zinc-100">
+            {bestMoveLabel || "—"}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

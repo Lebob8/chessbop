@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ChessBoard from "@/components/ChessBoard";
-import { useEngine } from "@/core/engine";
+import { OpponentEngine, type OpponentConfig, useEngine } from "@/core/engine";
 import { Chess } from "chess.js";
 import { EvalBar } from "@/components/analysis/EvalBar";
 import EnginePanel from "@/components/analysis/EnginePanel";
@@ -11,6 +11,13 @@ import { Controls } from "@/components/Controls";
 import { VariationControls } from "../VariationControls";
 import { GameTree } from "@/core/chess";
 import type { Move } from "@/core/chess";
+import { useBoardArrows } from "@/hooks/useBoardArrows";
+
+type MoveArrow = { from: string; to: string };
+type BestMoveDetails = {
+  label?: string;
+  arrow?: MoveArrow;
+};
 
 export default function AnalysisView() {
   const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -20,12 +27,132 @@ export default function AnalysisView() {
   const [treeVersion, setTreeVersion] = useState(0); // Trigger re-renders on tree changes
   const [engineEnabled, setEngineEnabled] = useState(true);
   const [analysisDepth, setAnalysisDepth] = useState(15);
+  const [showBestMove, setShowBestMove] = useState(true);
   const [orientation, setOrientation] = useState<"white" | "black">("white");
+  const [playVsEngine, setPlayVsEngine] = useState(false);
+  const [opponentElo, setOpponentElo] = useState(1350);
+  const [opponentMovetime, setOpponentMovetime] = useState(350);
+  const [opponentReady, setOpponentReady] = useState(false);
+  const [difficulty, setDifficulty] = useState<
+    "easy" | "medium" | "hard" | "very-hard"
+  >("medium");
+  const [showEngineTurnArrows, setShowEngineTurnArrows] = useState(false);
+
+  const opponentRef = useRef<OpponentEngine | null>(null);
+  const mountedRef = useRef(true);
+  const engineMoveTimeoutRef = useRef<number | null>(null);
+  const lastEngineRequestRef = useRef<string | null>(null);
 
   const { analysis, start, stop, analyze, isReady, isAnalyzing } = useEngine({
     autoStart: true,
     defaultOptions: { depth: analysisDepth, threads: 1, hash: 16 },
   });
+
+  const bestMoveUci = analysis.evaluation?.pv?.[0];
+  const bestMoveDetails = useMemo<BestMoveDetails>(() => {
+    if (!bestMoveUci || !currentFen) {
+      return { label: undefined, arrow: undefined };
+    }
+    const chessForBestMove = new Chess(currentFen);
+    const promotionPiece =
+      bestMoveUci.length === 5
+        ? (bestMoveUci[4] as "q" | "r" | "b" | "n")
+        : undefined;
+    let sanLabel: string | undefined;
+    let arrow: MoveArrow | undefined;
+
+    try {
+      const move = chessForBestMove.move({
+        from: bestMoveUci.slice(0, 2),
+        to: bestMoveUci.slice(2, 4),
+        promotion: promotionPiece,
+      });
+      sanLabel = move?.san;
+      if (move) {
+        arrow = { from: move.from, to: move.to };
+      }
+    } catch {
+      // If Chess.js rejects the move (e.g. stale eval vs current FEN),
+      // fall back to drawing the arrow directly from the UCI string.
+      if (bestMoveUci.length >= 4) {
+        arrow = {
+          from: bestMoveUci.slice(0, 2),
+          to: bestMoveUci.slice(2, 4),
+        };
+      }
+    }
+
+    return {
+      label: sanLabel || bestMoveUci,
+      arrow,
+    };
+  }, [bestMoveUci, currentFen]);
+  const bestMoveLabel = bestMoveDetails.label;
+  const bestMoveArrow = showBestMove ? bestMoveDetails.arrow : undefined;
+
+  const userSide: "w" | "b" = orientation === "white" ? "w" : "b";
+  const currentTurn: "w" | "b" =
+    currentFen.split(" ")[1] === "b" ? "b" : "w";
+  const isUserTurn = userSide === currentTurn;
+
+  const currentNode = gameTree.getCurrent();
+  const atHistory = currentNode.children.length > 0;
+  const previewInHistory = atHistory && engineEnabled && isReady;
+
+  const arrows = useBoardArrows({
+    infoPv: analysis.evaluation?.pv ?? null,
+    showArrows: showBestMove,
+    engineOn: engineEnabled && isReady,
+    playVsEngine,
+    currentTurn,
+    userSide,
+    atHistory,
+    previewInHistory,
+    practiceOn: false,
+    bookUCIs: [],
+    showBookArrows: false,
+    hintPulse: 0,
+    showEngineTurnArrows,
+  });
+
+  // Initialize opponent engine on mount
+  useEffect(() => {
+    mountedRef.current = true;
+    const opponent = new OpponentEngine();
+    opponentRef.current = opponent;
+
+    opponent
+      .initialize()
+      .then(() => {
+        if (!mountedRef.current) return;
+        setOpponentReady(true);
+      })
+      .catch((err) => {
+        console.error(
+          "[AnalysisView] Opponent engine failed to initialize:",
+          err,
+        );
+      });
+
+    return () => {
+      mountedRef.current = false;
+      if (engineMoveTimeoutRef.current != null) {
+        window.clearTimeout(engineMoveTimeoutRef.current);
+        engineMoveTimeoutRef.current = null;
+      }
+      try {
+        opponent.stop();
+      } catch {
+        // ignore
+      }
+      try {
+        opponent.terminate();
+      } catch {
+        // ignore
+      }
+      opponentRef.current = null;
+    };
+  }, []);
 
   const resetBoard = () => {
     gameTree.reset(START_FEN);
@@ -61,6 +188,162 @@ export default function AnalysisView() {
       setEngineEnabled(true);
     }
   };
+
+  const toggleBestMoveDisplay = () => {
+    setShowBestMove((prev) => !prev);
+  };
+
+  const togglePlayVsEngine = () => {
+    setPlayVsEngine((prev) => {
+      const next = !prev;
+      if (!next) {
+        try {
+          opponentRef.current?.stop();
+        } catch {
+          // ignore
+        }
+      } else {
+        // Reset last request so engine can move immediately when PvE is enabled
+        lastEngineRequestRef.current = null;
+      }
+      return next;
+    });
+  };
+
+  const handleDifficultyChange = (value: "easy" | "medium" | "hard" | "very-hard") => {
+    setDifficulty(value);
+    switch (value) {
+      case "easy":
+        setOpponentElo(400);
+        setOpponentMovetime(250);
+        break;
+      case "medium":
+        setOpponentElo(1350);
+        setOpponentMovetime(350);
+        break;
+      case "hard":
+        setOpponentElo(2200);
+        setOpponentMovetime(500);
+        break;
+      case "very-hard":
+        setOpponentElo(3000);
+        setOpponentMovetime(500);
+        break;
+    }
+    // Cancel any in-flight engine search and allow a fresh request
+    lastEngineRequestRef.current = null;
+    try {
+      opponentRef.current?.stop();
+    } catch {
+      // ignore
+    }
+  };
+
+  const attemptEngineMove = useCallback(
+    async (fen: string) => {
+      if (!playVsEngine || !opponentReady) return;
+      const opponent = opponentRef.current;
+      if (!opponent || !opponent.isReady() || !mountedRef.current) return;
+
+      const chess = new Chess(fen);
+      if (chess.isGameOver()) return;
+
+      const sideToMove: "w" | "b" = chess.turn();
+      const engineTurn =
+        (userSide === "w" && sideToMove === "b") ||
+        (userSide === "b" && sideToMove === "w");
+      if (!engineTurn) return;
+
+      const key = `${fen}-${sideToMove}`;
+      if (lastEngineRequestRef.current === key) return;
+      lastEngineRequestRef.current = key;
+
+      const cfg: OpponentConfig = {
+        useLimitStrength: true,
+        elo: opponentElo,
+        movetimeMs: opponentMovetime,
+      };
+
+      try {
+        console.log("[AnalysisView] Requesting opponent move", {
+          fen,
+          cfg,
+        });
+        const bestMoveUci = await opponent.bestMove(fen, cfg);
+        if (!bestMoveUci || !mountedRef.current) return;
+
+        const engineChess = new Chess(fen);
+        const promotionPiece =
+          bestMoveUci.length === 5
+            ? (bestMoveUci[4] as "q" | "r" | "b" | "n")
+            : undefined;
+        const move = engineChess.move({
+          from: bestMoveUci.slice(0, 2),
+          to: bestMoveUci.slice(2, 4),
+          promotion: promotionPiece,
+        });
+        if (!move) {
+          console.warn(
+            "[AnalysisView] Invalid engine move UCI:",
+            bestMoveUci,
+          );
+          return;
+        }
+
+        const moveData: Move = {
+          san: move.san,
+          from: move.from,
+          to: move.to,
+          color: move.color as "w" | "b",
+        };
+        console.log("[AnalysisView] Applied opponent move", {
+          uci: bestMoveUci,
+          san: move.san,
+          fenAfter: engineChess.fen(),
+        });
+        gameTree.addMove(moveData, engineChess.fen());
+        setCurrentFen(engineChess.fen());
+        setTreeVersion((v) => v + 1);
+      } catch (err) {
+        console.error("[AnalysisView] Engine move failed:", err);
+      }
+    },
+    [playVsEngine, opponentReady, userSide, opponentElo, opponentMovetime, gameTree],
+  );
+
+  // Trigger engine move automatically when it's the opponent's turn at the frontier
+  useEffect(() => {
+    if (!playVsEngine || !opponentReady) return;
+
+    const currentNode = gameTree.getCurrent();
+    const atLatest = currentNode.children.length === 0;
+    if (!atLatest) return;
+
+    const chess = new Chess(currentNode.fen);
+    if (chess.isGameOver()) return;
+
+    const sideToMove: "w" | "b" = chess.turn();
+    const engineTurn =
+      (userSide === "w" && sideToMove === "b") ||
+      (userSide === "b" && sideToMove === "w");
+    if (!engineTurn) return;
+
+    if (engineMoveTimeoutRef.current != null) {
+      window.clearTimeout(engineMoveTimeoutRef.current);
+      engineMoveTimeoutRef.current = null;
+    }
+
+    engineMoveTimeoutRef.current = window.setTimeout(() => {
+      void attemptEngineMove(currentNode.fen);
+    }, 300);
+
+    return () => {
+      if (engineMoveTimeoutRef.current != null) {
+        window.clearTimeout(engineMoveTimeoutRef.current);
+        engineMoveTimeoutRef.current = null;
+      }
+    };
+  }, [gameTree, playVsEngine, opponentReady, userSide, treeVersion, attemptEngineMove]);
 
   // Navigation handlers
   const goToStart = () => {
@@ -130,6 +413,9 @@ export default function AnalysisView() {
             onMove={handleMove} 
             onMoveDetail={handleMoveDetail} 
             orientation={orientation}
+            bestMoveArrow={bestMoveArrow}
+            arrows={arrows}
+            movable={!playVsEngine || isUserTurn}
             lastMove={gameTree.getCurrent().move ? [gameTree.getCurrent().move!.from, gameTree.getCurrent().move!.to] : undefined}
           />
           {gameOverInfo && (
@@ -178,6 +464,9 @@ export default function AnalysisView() {
           isAnalyzing={isAnalyzing}
           analysisDepth={analysisDepth}
           onChangeDepth={(d) => setAnalysisDepth(d)}
+          showBestMove={showBestMove}
+          onToggleBestMove={toggleBestMoveDisplay}
+          bestMoveLabel={bestMoveLabel}
         />
 
         {/* Move List panel */}
@@ -252,6 +541,68 @@ export default function AnalysisView() {
             >
               New Game / Reset
             </button>
+          </div>
+          {/* PvE controls */}
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={togglePlayVsEngine}
+              className={`rounded px-3 py-1.5 text-xs font-medium transition ${
+                playVsEngine
+                  ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                  : "bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
+              }`}
+            >
+              {playVsEngine ? "Stop Play vs Computer" : "Play vs Computer"}
+            </button>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-zinc-400">Difficulty</span>
+              <select
+                value={difficulty}
+                onChange={(e) =>
+                  handleDifficultyChange(
+                    e.target.value as "easy" | "medium" | "hard" | "very-hard",
+                  )
+                }
+                className="rounded border border-white/10 bg-zinc-900 px-2 py-1 text-xs text-zinc-300"
+              >
+                  <option value="easy">Easy (400)</option>
+                  <option value="medium">Medium (1350)</option>
+                  <option value="hard">Hard (2200)</option>
+                  <option value="very-hard">Very Hard (3000)</option>
+              </select>
+            </div>
+            {playVsEngine && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-zinc-400">Engine turn arrows</span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowEngineTurnArrows((prev) => !prev)
+                  }
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition ${
+                    showEngineTurnArrows
+                      ? "bg-blue-600 text-white hover:bg-blue-700"
+                      : "bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
+                  }`}
+                >
+                  {showEngineTurnArrows ? "Shown" : "Hidden"}
+                </button>
+              </div>
+            )}
+            {playVsEngine && (
+              <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500">
+                <span>
+                  {opponentReady ? "Engine ready" : "Engine starting..."}
+                </span>
+                <span>Strength: ~ELO {opponentElo}</span>
+                {opponentReady && !isUserTurn && (
+                  <span className="text-amber-400">
+                    Engine thinking&hellip;
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </aside>

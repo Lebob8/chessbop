@@ -6,6 +6,7 @@ import type { Api } from "chessground/api";
 import { Chess } from "chess.js";
 import type { Key } from "chessground/types";
 import type { BoardArrow } from "@/core/chess";
+import { useChessSounds } from "@/hooks/useChessSounds";
 
 interface ChessBoardProps {
   initialFen?: string;
@@ -33,6 +34,7 @@ export default function ChessBoard({
   const [chess] = useState(() => new Chess(initialFen));
   const bestMoveArrowRef = useRef(bestMoveArrow);
   const arrowsRef = useRef<BoardArrow[] | undefined>(arrows);
+  const { playMove } = useChessSounds();
 
   const applyArrows = (cg: Api) => {
     const activeArrows: BoardArrow[] = (() => {
@@ -116,6 +118,11 @@ export default function ChessBoard({
               },
             });
             applyArrows(cg);
+            try {
+              playMove(chess, move as { flags?: string });
+            } catch {
+              // ignore sound errors
+            }
             onMove?.(chess.fen());
             if (move && onMoveDetail) {
               onMoveDetail({ fen: chess.fen(), san: move.san, color: move.color as "w" | "b", from: move.from, to: move.to });

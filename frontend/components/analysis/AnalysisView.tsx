@@ -12,6 +12,7 @@ import { VariationControls } from "../VariationControls";
 import { GameTree } from "@/core/chess";
 import type { Move } from "@/core/chess";
 import { useBoardArrows } from "@/hooks/useBoardArrows";
+import { useChessSounds } from "@/hooks/useChessSounds";
 
 type MoveArrow = { from: string; to: string };
 type BestMoveDetails = {
@@ -47,6 +48,7 @@ export default function AnalysisView() {
   const mountedRef = useRef(true);
   const engineMoveTimeoutRef = useRef<number | null>(null);
   const lastEngineRequestRef = useRef<string | null>(null);
+  const { play, playMove } = useChessSounds();
 
   const { analysis, start, stop, analyze, isReady, isAnalyzing } = useEngine({
     autoStart: true,
@@ -124,7 +126,7 @@ export default function AnalysisView() {
   useEffect(() => {
     setFenInput(currentFen);
     setFenError(null);
-  }, [currentFen, setFenInput, setFenError]);
+  }, [currentFen]);
 
   // Rebuild PGN export whenever the main line changes
   useEffect(() => {
@@ -156,12 +158,6 @@ export default function AnalysisView() {
       setPgnExport("");
     }
   }, [gameTree, treeVersion, setPgnExport]);
-
-  // Keep FEN input prefilled with the current position
-  useEffect(() => {
-    setFenInput(currentFen);
-    setFenError(null);
-  }, [currentFen]);
 
   // Initialize opponent engine on mount
   useEffect(() => {
@@ -349,6 +345,11 @@ export default function AnalysisView() {
           san: move.san,
           fenAfter: engineChess.fen(),
         });
+        try {
+          playMove(engineChess, move as { flags?: string });
+        } catch {
+          // ignore sound errors
+        }
         gameTree.addMove(moveData, engineChess.fen());
         setCurrentFen(engineChess.fen());
         setTreeVersion((v) => v + 1);
@@ -399,6 +400,7 @@ export default function AnalysisView() {
     setCurrentFen(gameTree.getCurrent().fen);
     setBoardKey((k) => k + 1);
     setTreeVersion((v) => v + 1);
+    play("move");
   };
 
   const goToPrev = () => {
@@ -406,6 +408,7 @@ export default function AnalysisView() {
       setCurrentFen(gameTree.getCurrent().fen);
       setBoardKey((k) => k + 1);
       setTreeVersion((v) => v + 1);
+      play("move");
     }
   };
 
@@ -414,6 +417,7 @@ export default function AnalysisView() {
       setCurrentFen(gameTree.getCurrent().fen);
       setBoardKey((k) => k + 1);
       setTreeVersion((v) => v + 1);
+      play("move");
     }
   };
 
@@ -422,6 +426,7 @@ export default function AnalysisView() {
     setCurrentFen(gameTree.getCurrent().fen);
     setBoardKey((k) => k + 1);
     setTreeVersion((v) => v + 1);
+    play("move");
   };
 
   // Analyze position when FEN changes and engine is enabled (skip terminal positions)
@@ -605,6 +610,7 @@ export default function AnalysisView() {
                   setCurrentFen(gameTree.getCurrent().fen);
                   setBoardKey((k) => k + 1);
                   setTreeVersion((v) => v + 1);
+                  play("move");
                 }
               }}
             />

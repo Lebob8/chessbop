@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ChessBoard from "@/components/ChessBoard";
@@ -6,6 +6,9 @@ import { OpponentEngine, type OpponentConfig, useEngine } from "@/core/engine";
 import { Chess } from "chess.js";
 import { EvalBar } from "@/components/analysis/EvalBar";
 import EnginePanel from "@/components/analysis/EnginePanel";
+import { PlayVsEngineControls } from "@/components/analysis/PlayVsEngineControls";
+import { FenPgnControls } from "@/components/analysis/FenPgnControls";
+import { GameOverBanner } from "@/components/analysis/GameOverBanner";
 import { MoveListTree } from "../MoveListTree";
 import { Controls } from "@/components/Controls";
 import { VariationControls } from "../VariationControls";
@@ -20,15 +23,100 @@ type BestMoveDetails = {
   arrow?: MoveArrow;
 };
 
+type GameOverInfo = {
+  label: string;
+};
+
+/**
+ * Derive a readable best-move label and arrow
+ * from the engine's primary PV and current FEN.
+ */
+function getBestMoveDetails(
+  bestMoveUci: string | undefined,
+  currentFen: string,
+): BestMoveDetails {
+  if (!bestMoveUci || !currentFen) {
+    return { label: undefined, arrow: undefined };
+  }
+
+  const chessForBestMove = new Chess(currentFen);
+  const promotionPiece =
+    bestMoveUci.length === 5
+      ? (bestMoveUci[4] as "q" | "r" | "b" | "n")
+      : undefined;
+
+  let sanLabel: string | undefined;
+  let arrow: MoveArrow | undefined;
+
+  try {
+    const move = chessForBestMove.move({
+      from: bestMoveUci.slice(0, 2),
+      to: bestMoveUci.slice(2, 4),
+      promotion: promotionPiece,
+    });
+
+    sanLabel = move?.san;
+
+    if (move) {
+      arrow = { from: move.from, to: move.to };
+    }
+  } catch {
+    // If Chess.js rejects the move (e.g. stale eval vs current FEN),
+    // fall back to drawing the arrow directly from the UCI string.
+    if (bestMoveUci.length >= 4) {
+      arrow = {
+        from: bestMoveUci.slice(0, 2),
+        to: bestMoveUci.slice(2, 4),
+      };
+    }
+  }
+
+  return {
+    label: sanLabel || bestMoveUci,
+    arrow,
+  };
+}
+
+/**
+ * Compute a concise game-over message from the current FEN.
+ */
+function getGameOverInfo(currentFen: string): GameOverInfo | null {
+  try {
+    const c = new Chess(currentFen);
+    if (!c.isGameOver()) return null;
+
+    if (c.isCheckmate()) {
+      const winner = c.turn() === "w" ? "Black" : "White";
+      return { label: `Checkmate � ${winner} wins` };
+    }
+
+    if (c.isStalemate()) return { label: "Draw � stalemate" };
+    if (c.isInsufficientMaterial())
+      return { label: "Draw � insufficient material" };
+    if (c.isDraw()) return { label: "Draw" };
+
+    return { label: "Game over" };
+  } catch {
+    return null;
+  }
+}
+
 export default function AnalysisView() {
+  // Base chess position (start of a new game)
   const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+  // Core game state (tree of moves + current position)
   const [gameTree] = useState(() => new GameTree(START_FEN));
   const [boardKey, setBoardKey] = useState(0);
   const [currentFen, setCurrentFen] = useState(START_FEN);
   const [treeVersion, setTreeVersion] = useState(0); // Trigger re-renders on tree changes
+
+  // Engine / analysis settings
   const [engineEnabled, setEngineEnabled] = useState(true);
   const [analysisDepth, setAnalysisDepth] = useState(15);
   const [showBestMove, setShowBestMove] = useState(true);
+
+  // Board / user interaction state
   const [orientation, setOrientation] = useState<"white" | "black">("white");
   const [playVsEngine, setPlayVsEngine] = useState(false);
   const [opponentElo, setOpponentElo] = useState(1350);
@@ -38,12 +126,14 @@ export default function AnalysisView() {
     "easy" | "medium" | "hard" | "very-hard"
   >("medium");
   const [showEngineTurnArrows, setShowEngineTurnArrows] = useState(false);
-  const [fenInput, setFenInput] = useState("");
+
+  // Import / export inputs
+  const [fenInput, setFenInput] = useState<string | null>(null);
   const [fenError, setFenError] = useState<string | null>(null);
   const [pgnInput, setPgnInput] = useState("");
   const [pgnError, setPgnError] = useState<string | null>(null);
-  const [pgnExport, setPgnExport] = useState("");
 
+  // Imperative refs for opponent engine & timers
   const opponentRef = useRef<OpponentEngine | null>(null);
   const mountedRef = useRef(true);
   const engineMoveTimeoutRef = useRef<number | null>(null);
@@ -56,44 +146,10 @@ export default function AnalysisView() {
   });
 
   const bestMoveUci = analysis.evaluation?.pv?.[0];
-  const bestMoveDetails = useMemo<BestMoveDetails>(() => {
-    if (!bestMoveUci || !currentFen) {
-      return { label: undefined, arrow: undefined };
-    }
-    const chessForBestMove = new Chess(currentFen);
-    const promotionPiece =
-      bestMoveUci.length === 5
-        ? (bestMoveUci[4] as "q" | "r" | "b" | "n")
-        : undefined;
-    let sanLabel: string | undefined;
-    let arrow: MoveArrow | undefined;
-
-    try {
-      const move = chessForBestMove.move({
-        from: bestMoveUci.slice(0, 2),
-        to: bestMoveUci.slice(2, 4),
-        promotion: promotionPiece,
-      });
-      sanLabel = move?.san;
-      if (move) {
-        arrow = { from: move.from, to: move.to };
-      }
-    } catch {
-      // If Chess.js rejects the move (e.g. stale eval vs current FEN),
-      // fall back to drawing the arrow directly from the UCI string.
-      if (bestMoveUci.length >= 4) {
-        arrow = {
-          from: bestMoveUci.slice(0, 2),
-          to: bestMoveUci.slice(2, 4),
-        };
-      }
-    }
-
-    return {
-      label: sanLabel || bestMoveUci,
-      arrow,
-    };
-  }, [bestMoveUci, currentFen]);
+  const bestMoveDetails = useMemo<BestMoveDetails>(
+    () => getBestMoveDetails(bestMoveUci, currentFen),
+    [bestMoveUci, currentFen],
+  );
   const bestMoveLabel = bestMoveDetails.label;
   const bestMoveArrow = showBestMove ? bestMoveDetails.arrow : undefined;
 
@@ -122,27 +178,26 @@ export default function AnalysisView() {
     showEngineTurnArrows,
   });
 
-  // Keep FEN input prefilled with the current position
-  useEffect(() => {
-    setFenInput(currentFen);
-    setFenError(null);
-  }, [currentFen]);
-
   // Rebuild PGN export whenever the main line changes
-  useEffect(() => {
+  const pgnExport = useMemo(() => {
+    // Tie recomputation to treeVersion since gameTree mutates in place
+    void treeVersion;
+
     try {
       const mainLine = gameTree.getMainLine();
       if (!mainLine.length) {
-        setPgnExport("");
-        return;
+        return "";
       }
+
       const root = mainLine[0];
       const rootFen = root.fen;
       const chessForPgn = new Chess(rootFen);
+
       if (rootFen !== START_FEN) {
         chessForPgn.header("SetUp", "1");
         chessForPgn.header("FEN", rootFen);
       }
+
       for (let i = 1; i < mainLine.length; i += 1) {
         const mv = mainLine[i].move;
         if (!mv) continue;
@@ -152,12 +207,12 @@ export default function AnalysisView() {
           promotion: mv.promotion,
         });
       }
-      const pgn = chessForPgn.pgn();
-      setPgnExport(pgn);
+
+      return chessForPgn.pgn();
     } catch {
-      setPgnExport("");
+      return "";
     }
-  }, [gameTree, treeVersion, setPgnExport]);
+  }, [gameTree, treeVersion, START_FEN]);
 
   // Initialize opponent engine on mount
   useEffect(() => {
@@ -237,6 +292,7 @@ export default function AnalysisView() {
     setShowBestMove((prev) => !prev);
   };
 
+  // Toggle play-vs-engine mode and stop any in-flight opponent search
   const togglePlayVsEngine = () => {
     setPlayVsEngine((prev) => {
       const next = !prev;
@@ -254,6 +310,7 @@ export default function AnalysisView() {
     });
   };
 
+  // Update opponent strength presets and clear any in-flight engine search
   const handleDifficultyChange = (value: "easy" | "medium" | "hard" | "very-hard") => {
     setDifficulty(value);
     switch (value) {
@@ -357,7 +414,7 @@ export default function AnalysisView() {
         console.error("[AnalysisView] Engine move failed:", err);
       }
     },
-    [playVsEngine, opponentReady, userSide, opponentElo, opponentMovetime, gameTree],
+    [playVsEngine, opponentReady, userSide, opponentElo, opponentMovetime, gameTree, playMove],
   );
 
   // Trigger engine move automatically when it's the opponent's turn at the frontier
@@ -433,12 +490,12 @@ export default function AnalysisView() {
   useEffect(() => {
     if (!engineEnabled || !isReady || !currentFen) return;
     const c = new Chess(currentFen);
-      if (c.isGameOver()) return; // avoid analyzing checkmate/stalemate positions
-      analyze(currentFen, { depth: analysisDepth });
-    }, [currentFen, engineEnabled, isReady, analysisDepth, analyze, treeVersion]);
+    if (c.isGameOver()) return; // avoid analyzing checkmate/stalemate positions
+    analyze(currentFen, { depth: analysisDepth });
+  }, [currentFen, engineEnabled, isReady, analysisDepth, analyze, treeVersion]);
 
   const handleLoadFen = () => {
-    const raw = fenInput.trim();
+    const raw = (fenInput === null ? currentFen : fenInput).trim();
     if (!raw) {
       setFenError("Please paste a FEN string.");
       return;
@@ -511,51 +568,28 @@ export default function AnalysisView() {
   };
 
   // Game over banner message
-  const gameOverInfo = useMemo(() => {
-    try {
-      const c = new Chess(currentFen);
-      if (!c.isGameOver()) return null;
-      if (c.isCheckmate()) {
-        const winner = c.turn() === "w" ? "Black" : "White";
-        return { label: `Checkmate — ${winner} wins` };
-      }
-      if (c.isStalemate()) return { label: "Draw — stalemate" };
-      if (c.isInsufficientMaterial()) return { label: "Draw — insufficient material" };
-      if (c.isDraw()) return { label: "Draw" };
-      return { label: "Game over" };
-    } catch {
-      return null;
-    }
-  }, [currentFen]);
+  const gameOverInfo = useMemo(
+    () => getGameOverInfo(currentFen),
+    [currentFen],
+  );
 
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,700px)_minmax(260px,1fr)] lg:grid-cols-[minmax(0,800px)_minmax(320px,1fr)]">
       {/* Board area */}
       <section className="flex items-start gap-1">
         <div className="rounded-lg border border-white/10 bg-zinc-950/50 p-3">
-          <ChessBoard 
-            key={boardKey} 
-            initialFen={currentFen} 
-            onMove={handleMove} 
-            onMoveDetail={handleMoveDetail} 
+          <ChessBoard
+            key={boardKey}
+            initialFen={currentFen}
+            onMove={handleMove}
+            onMoveDetail={handleMoveDetail}
             orientation={orientation}
             bestMoveArrow={bestMoveArrow}
             arrows={arrows}
             movable={!playVsEngine || isUserTurn}
             lastMove={gameTree.getCurrent().move ? [gameTree.getCurrent().move!.from, gameTree.getCurrent().move!.to] : undefined}
           />
-          {gameOverInfo && (
-            <div className="mt-3 flex items-center justify-between rounded-md border border-white/10 bg-zinc-900 px-3 py-2 text-sm text-zinc-200">
-              <span>{gameOverInfo.label}</span>
-              <button
-                type="button"
-                onClick={resetBoard}
-                className="rounded-md border border-white/10 bg-zinc-800 px-2 py-1 text-xs hover:bg-zinc-700"
-              >
-                New Game
-              </button>
-            </div>
-          )}
+          <GameOverBanner info={gameOverInfo} onReset={resetBoard} />
         </div>
         {/* Vertical evaluation bar (hidden on small screens) */}
         <div className="hidden md:block">
@@ -645,7 +679,7 @@ export default function AnalysisView() {
         />
 
         <div className="flex w-full flex-col gap-3 rounded-lg border border-white/10 bg-zinc-950/50 p-3">
-          {/* Settings row */}
+          {/* Board-side selector and reset */}
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <label htmlFor="board-side" className="text-xs text-zinc-400">
@@ -654,7 +688,9 @@ export default function AnalysisView() {
               <select
                 id="board-side"
                 value={orientation}
-                onChange={(e) => setOrientation(e.target.value as "white" | "black")}
+                onChange={(e) =>
+                  setOrientation(e.target.value as "white" | "black")
+                }
                 className="rounded border border-white/10 bg-zinc-900 px-2 py-1 text-xs text-zinc-300"
               >
                 <option value="white">White</option>
@@ -669,181 +705,41 @@ export default function AnalysisView() {
               New Game / Reset
             </button>
           </div>
-          {/* PvE controls */}
-          <div className="mt-2 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={togglePlayVsEngine}
-              className={`rounded px-3 py-1.5 text-xs font-medium transition ${
-                playVsEngine
-                  ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                  : "bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
-              }`}
-            >
-              {playVsEngine ? "Stop Play vs Computer" : "Play vs Computer"}
-            </button>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-zinc-400">Difficulty</span>
-              <select
-                value={difficulty}
-                onChange={(e) =>
-                  handleDifficultyChange(
-                    e.target.value as "easy" | "medium" | "hard" | "very-hard",
-                  )
-                }
-                className="rounded border border-white/10 bg-zinc-900 px-2 py-1 text-xs text-zinc-300"
-              >
-                  <option value="easy">Easy (400)</option>
-                  <option value="medium">Medium (1350)</option>
-                  <option value="hard">Hard (2200)</option>
-                  <option value="very-hard">Very Hard (3000)</option>
-              </select>
-            </div>
-            {playVsEngine && (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-zinc-400">Engine turn arrows</span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setShowEngineTurnArrows((prev) => !prev)
-                  }
-                  className={`rounded px-2 py-1 text-[11px] font-medium transition ${
-                    showEngineTurnArrows
-                      ? "bg-blue-600 text-white hover:bg-blue-700"
-                      : "bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
-                  }`}
-                >
-                  {showEngineTurnArrows ? "Shown" : "Hidden"}
-                </button>
-              </div>
-            )}
-            {playVsEngine && (
-              <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500">
-                <span>
-                  {opponentReady ? "Engine ready" : "Engine starting..."}
-                </span>
-                <span>Strength: ~ELO {opponentElo}</span>
-                {opponentReady && !isUserTurn && (
-                  <span className="text-amber-400">
-                    Engine thinking&hellip;
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-          {/* FEN import/export */}
-          <div className="mt-3 space-y-2">
-            <div className="space-y-1">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs text-zinc-400">Current FEN</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void navigator.clipboard?.writeText(currentFen);
-                  }}
-                  className="rounded border border-white/10 bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-200 hover:bg-zinc-700"
-                >
-                  Copy
-                </button>
-              </div>
-              <textarea
-                className="w-full resize-none rounded border border-white/10 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-300"
-                rows={2}
-                value={currentFen}
-                readOnly
-              />
-            </div>
 
-            <div className="space-y-1">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs text-zinc-400">Load FEN</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFenInput("");
-                    setFenError(null);
-                  }}
-                  className="rounded border border-white/10 bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-200 hover:bg-zinc-700"
-                >
-                  Clear
-                </button>
-              </div>
-              <textarea
-                className="w-full resize-none rounded border border-white/10 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-300"
-                rows={2}
-                value={fenInput}
-                onChange={(e) => setFenInput(e.target.value)}
-                placeholder="Paste FEN here and click Load"
-              />
-              {fenError && (
-                <div className="text-[11px] text-red-400">{fenError}</div>
-              )}
-              <button
-                type="button"
-                onClick={handleLoadFen}
-                className="rounded-md border border-white/10 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-800"
-              >
-                Load FEN into analysis
-              </button>
-            </div>
-          </div>
+          <PlayVsEngineControls
+            playVsEngine={playVsEngine}
+            onTogglePlayVsEngine={togglePlayVsEngine}
+            difficulty={difficulty}
+            onDifficultyChange={handleDifficultyChange}
+            showEngineTurnArrows={showEngineTurnArrows}
+            onToggleEngineTurnArrows={() =>
+              setShowEngineTurnArrows((prev) => !prev)
+            }
+            opponentReady={opponentReady}
+            opponentElo={opponentElo}
+            isUserTurn={isUserTurn}
+          />
 
-          {/* PGN import/export */}
-          <div className="mt-4 space-y-2">
-            <div className="space-y-1">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs text-zinc-400">Current PGN (main line)</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void navigator.clipboard?.writeText(pgnExport);
-                  }}
-                  className="rounded border border-white/10 bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-200 hover:bg-zinc-700"
-                >
-                  Copy
-                </button>
-              </div>
-              <textarea
-                className="w-full resize-none rounded border border-white/10 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-300"
-                rows={4}
-                value={pgnExport}
-                readOnly
-              />
-            </div>
-
-            <div className="space-y-1">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs text-zinc-400">Load PGN</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPgnInput("");
-                    setPgnError(null);
-                  }}
-                  className="rounded border border-white/10 bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-200 hover:bg-zinc-700"
-                >
-                  Clear
-                </button>
-              </div>
-              <textarea
-                className="w-full resize-none rounded border border-white/10 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-300"
-                rows={4}
-                value={pgnInput}
-                onChange={(e) => setPgnInput(e.target.value)}
-                placeholder="Paste PGN here and click Load"
-              />
-              {pgnError && (
-                <div className="text-[11px] text-red-400">{pgnError}</div>
-              )}
-              <button
-                type="button"
-                onClick={handleLoadPgn}
-                className="rounded-md border border-white/10 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-800"
-              >
-                Load PGN into analysis
-              </button>
-            </div>
-          </div>
+          <FenPgnControls
+            currentFen={currentFen}
+            fenInput={fenInput}
+            onFenInputChange={setFenInput}
+            onFenClear={() => {
+              setFenInput("");
+              setFenError(null);
+            }}
+            fenError={fenError}
+            onLoadFen={handleLoadFen}
+            pgnExport={pgnExport}
+            pgnInput={pgnInput}
+            onPgnInputChange={setPgnInput}
+            onPgnClear={() => {
+              setPgnInput("");
+              setPgnError(null);
+            }}
+            pgnError={pgnError}
+            onLoadPgn={handleLoadPgn}
+          />
         </div>
       </aside>
     </div>

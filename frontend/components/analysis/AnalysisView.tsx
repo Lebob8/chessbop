@@ -9,6 +9,8 @@ import EnginePanel from "@/components/analysis/EnginePanel";
 import { PlayVsEngineControls } from "@/components/analysis/PlayVsEngineControls";
 import { FenPgnControls } from "@/components/analysis/FenPgnControls";
 import { GameOverBanner } from "@/components/analysis/GameOverBanner";
+import { OpeningPanel } from "@/components/analysis/OpeningPanel";
+import { classifyOpeningFromNode, type OpeningEntry, fenToEpd, getBookMovesByEpd } from "@/core/chess";
 import { MoveListTree } from "../MoveListTree";
 import { Controls } from "@/components/Controls";
 import { VariationControls } from "../VariationControls";
@@ -132,6 +134,25 @@ export default function AnalysisView() {
   const [fenError, setFenError] = useState<string | null>(null);
   const [pgnInput, setPgnInput] = useState("");
   const [pgnError, setPgnError] = useState<string | null>(null);
+  const [showBookSuggestions, setShowBookSuggestions] = useState(true);
+  const opening = useMemo<OpeningEntry | null>(() => {
+    void treeVersion;
+    void currentFen;
+    try {
+      return classifyOpeningFromNode(gameTree.getCurrent());
+    } catch {
+      return null;
+    }
+  }, [gameTree, treeVersion, currentFen]);
+
+  const bookMoves = useMemo<string[]>(() => {
+    try {
+      const epd = fenToEpd(currentFen);
+      return getBookMovesByEpd(epd);
+    } catch {
+      return [];
+    }
+  }, [currentFen]);
 
   // Imperative refs for opponent engine & timers
   const opponentRef = useRef<OpponentEngine | null>(null);
@@ -162,9 +183,11 @@ export default function AnalysisView() {
   const atHistory = currentNode.children.length > 0;
   const previewInHistory = atHistory && engineEnabled && isReady;
 
+  const bookMovesForArrows = showBookSuggestions ? bookMoves : [];
+  const derivedShowBestMove = showBestMove && !(showBookSuggestions && bookMoves.length > 0);
   const arrows = useBoardArrows({
     infoPv: analysis.evaluation?.pv ?? null,
-    showArrows: showBestMove,
+    showArrows: derivedShowBestMove,
     engineOn: engineEnabled && isReady,
     playVsEngine,
     currentTurn,
@@ -172,8 +195,8 @@ export default function AnalysisView() {
     atHistory,
     previewInHistory,
     practiceOn: false,
-    bookUCIs: [],
-    showBookArrows: false,
+    bookUCIs: bookMovesForArrows,
+    showBookArrows: bookMovesForArrows.length > 0,
     hintPulse: 0,
     showEngineTurnArrows,
   });
@@ -486,6 +509,27 @@ export default function AnalysisView() {
     play("move");
   };
 
+  const handlePlayBookUci = (uci: string) => {
+    try {
+      const chess = new Chess(currentFen);
+      const promotion = uci.length === 5 ? (uci[4] as "q" | "r" | "b" | "n") : undefined;
+      const move = chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion });
+      if (!move) return;
+      const moveData: Move = {
+        san: move.san,
+        from: move.from,
+        to: move.to,
+        color: move.color as "w" | "b",
+        promotion: move.promotion as "q" | "r" | "b" | "n" | undefined,
+      };
+      try { playMove(chess, move as { flags?: string }); } catch {}
+      gameTree.addMove(moveData, chess.fen());
+      setCurrentFen(chess.fen());
+      setBoardKey((k) => k + 1);
+      setTreeVersion((v) => v + 1);
+    } catch {}
+  };
+
   // Analyze position when FEN changes and engine is enabled (skip terminal positions)
   useEffect(() => {
     if (!engineEnabled || !isReady || !currentFen) return;
@@ -493,6 +537,8 @@ export default function AnalysisView() {
     if (c.isGameOver()) return; // avoid analyzing checkmate/stalemate positions
     analyze(currentFen, { depth: analysisDepth });
   }, [currentFen, engineEnabled, isReady, analysisDepth, analyze, treeVersion]);
+
+  // Opening is derived via useMemo above; no effect needed
 
   const handleLoadFen = () => {
     const raw = (fenInput === null ? currentFen : fenInput).trim();
@@ -616,6 +662,16 @@ export default function AnalysisView() {
             showLabel={true}
           />
         </div>
+        {/* Opening panel */}
+        <OpeningPanel
+          opening={opening}
+          bookMoves={bookMovesForArrows}
+          currentFen={currentFen}
+          onPlayBookUci={handlePlayBookUci}
+          bookEnabled={showBookSuggestions}
+          onToggleBookEnabled={() => setShowBookSuggestions((v) => !v)}
+        />
+
         {/* Engine panel */}
         <EnginePanel
           engineEnabled={engineEnabled}

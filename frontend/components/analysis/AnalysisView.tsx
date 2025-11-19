@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import ChessBoard from "@/components/ChessBoard";
 import { OpponentEngine, type OpponentConfig, useEngine } from "@/core/engine";
 import { Chess } from "chess.js";
@@ -104,6 +105,7 @@ function getGameOverInfo(currentFen: string): GameOverInfo | null {
 }
 
 export default function AnalysisView() {
+  const searchParams = useSearchParams();
   // Base chess position (start of a new game)
   const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -538,6 +540,22 @@ export default function AnalysisView() {
     analyze(currentFen, { depth: analysisDepth });
   }, [currentFen, engineEnabled, isReady, analysisDepth, analyze, treeVersion]);
 
+  // Accept external FEN via URL param (?fen=...)
+  useEffect(() => {
+    try {
+      const urlFen = searchParams?.get("fen");
+      if (!urlFen) return;
+      const c = new Chess(urlFen);
+      const normalized = c.fen();
+      if (normalized === currentFen) return;
+      gameTree.reset(normalized);
+      setCurrentFen(normalized);
+      setBoardKey((k) => k + 1);
+      setTreeVersion((v) => v + 1);
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   // Opening is derived via useMemo above; no effect needed
 
   const handleLoadFen = () => {
@@ -622,7 +640,7 @@ export default function AnalysisView() {
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,700px)_minmax(260px,1fr)] lg:grid-cols-[minmax(0,800px)_minmax(320px,1fr)]">
       {/* Board area */}
-      <section className="flex items-start gap-1">
+      <section className="flex items-start justify-center gap-1">
         <div className="rounded-lg border border-white/10 bg-zinc-950/50 p-3">
           <ChessBoard
             key={boardKey}

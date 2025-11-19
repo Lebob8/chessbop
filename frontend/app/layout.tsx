@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Link from "next/link";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -27,14 +28,12 @@ export default function RootLayout({
       <head>
         <script src="/lib/stockfish.js" async />
       </head>
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} bg-black text-zinc-100 antialiased`}
-      >
+      <body className={`${geistSans.variable} ${geistMono.variable} bg-black text-zinc-100 antialiased`}>
         <header className="border-b border-white/10 bg-zinc-950/50">
           <div className="mx-auto max-w-7xl px-4 py-4">
-            <a href="/" className="text-2xl font-bold hover:text-blue-400 transition-colors">
-              ♟️ ChessBop
-            </a>
+            <Link href="/" className="text-2xl font-bold transition-colors hover:text-blue-400">
+              ChessBop
+            </Link>
           </div>
         </header>
         <main className="min-h-[calc(100vh-73px)]">{children}</main>
@@ -42,3 +41,4 @@ export default function RootLayout({
     </html>
   );
 }
+

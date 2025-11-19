@@ -19,8 +19,7 @@ type BoardEditorProps = {
 };
 
 /**
- * Minimal Chessground setup for the editor. In step 2 we only render a board
- * bound to the provided FEN. Placement interactions will be added next.
+ * Minimal Chessground setup for the editor
  */
 export function BoardEditor({
   fen,
@@ -47,7 +46,7 @@ export function BoardEditor({
       movable: { free: true, color: "both" },
       draggable: { enabled: true, showGhost: true },
       events: {
-        move: (orig: any, dest: any) => {
+        move: (orig: Key, dest: Key) => {
           recentDragAtRef.current = Date.now();
           if (onMove) onMove(orig as Square, dest as Square);
         },
@@ -73,10 +72,11 @@ export function BoardEditor({
   useEffect(() => {
     if (!cgRef.current) return;
     const placing = selectedTool !== "move";
-    cgRef.current.set({
+    const update = {
       movable: { free: !placing, color: placing ? undefined : "both" },
       draggable: { enabled: !placing, showGhost: true },
-    } as any);
+    } as Parameters<Api["set"]>[0];
+    cgRef.current.set(update);
   }, [selectedTool]);
 
   const handleClick = (e: MouseEvent<HTMLDivElement>) => {

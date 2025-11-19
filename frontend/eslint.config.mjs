@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Third-party assets (compiled/minified) under public
+    "public/**",
   ]),
   // Allow CommonJS in scripts and relax Node script-specific rules
   {

@@ -6,6 +6,7 @@ import { editorStateFromFEN, editorStateToFEN, startPositionState, type EditorSt
 import { Chess } from "chess.js";
 import { PiecePalette, type EditorTool } from "@/components/editor/PiecePalette";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 export default function EditorPage() {
   const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -47,7 +48,7 @@ export default function EditorPage() {
         return { ok: false, error: `invalid castling rights (${inconsistencies.join(",")})` };
       }
       return { ok: true };
-    } catch (e) {
+    } catch {
       return { ok: false, error: "invalid castling rights" };
     }
   };
@@ -61,12 +62,12 @@ export default function EditorPage() {
       
       <div className="mb-3 flex items-center justify-between">
         <h1 className="text-xl font-semibold">Board Editor</h1>
-        <a
+        <Link
           href="/analysis"
           className="rounded border border-white/10 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800"
         >
           Open Analysis
-        </a>
+        </Link>
       </div>
       <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,560px)_minmax(260px,1fr)]">
         <div className="rounded-lg border border-white/10 bg-zinc-950/50 p-4">

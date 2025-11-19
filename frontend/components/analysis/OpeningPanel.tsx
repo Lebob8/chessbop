@@ -26,9 +26,10 @@ export function OpeningPanel({
     return bookMoves.map((uci) => {
       try {
         const chess = new Chess(currentFen);
-        const promotion = uci.length === 5 ? (uci[4] as any) : undefined;
+        const promotion: "q" | "r" | "b" | "n" | undefined =
+          uci.length === 5 ? (uci[4] as "q" | "r" | "b" | "n") : undefined;
         const move = chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion });
-        const san = (move && (move as any).san) || uci;
+        const san: string = move?.san ?? uci;
         return { uci, san };
       } catch {
         return { uci, san: uci };

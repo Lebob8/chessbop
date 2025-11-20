@@ -2,7 +2,7 @@
 
 Chess analysis board with Stockfish WASM.
 
-## 🚀 Getting Started
+## Getting Started
 
 ```bash
 # Install dependencies
@@ -24,7 +24,7 @@ npm run lint
 npm run format
 ```
 
-## 🛠 Tech Stack
+## Tech Stack
 
 - **Next.js 16** (App Router)
 - **React 19** + TypeScript

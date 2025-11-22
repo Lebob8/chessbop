@@ -36,6 +36,26 @@ interface StockfishEngine {
   terminate?(): void;
 }
 
+type StockfishGlobal = {
+  Stockfish?: () => Promise<StockfishEngine>;
+  StockfishMobile?: () => Promise<StockfishEngine>;
+};
+
+/**
+ * Detect whether the current environment can run the threaded/SAB engine.
+ * Mobile browsers (especially iOS Safari) often fail this and should use
+ * a non-threaded fallback build instead.
+ */
+function supportsThreadedEngine(): boolean {
+  return (
+    typeof SharedArrayBuffer !== "undefined" &&
+    typeof Atomics !== "undefined" &&
+    // crossOriginIsolated is required for SAB in browsers
+    (globalThis as typeof globalThis & { crossOriginIsolated?: boolean })
+      .crossOriginIsolated === true
+  );
+}
+
 /**
  * Wrapper around Stockfish WASM engine with UCI protocol
  */
@@ -51,21 +71,31 @@ export class StockfishWorker {
    * Initialize the Stockfish engine
    */
   async initialize(options: EngineOptions = {}): Promise<void> {
-    // Load Stockfish from global (provided by stockfish.js script)
-    if (
-      typeof window === "undefined" ||
-      !(window as unknown as { Stockfish?: () => Promise<StockfishEngine> })
-        .Stockfish
-    ) {
+    if (typeof window === "undefined") {
+      throw new Error("Stockfish engine can only be initialized in a browser environment.");
+    }
+
+    const engines = window as unknown as StockfishGlobal;
+    const useThreaded = supportsThreadedEngine();
+
+    const factory =
+      useThreaded && engines.Stockfish
+        ? engines.Stockfish
+        : engines.StockfishMobile
+          ? engines.StockfishMobile
+          : undefined;
+
+    if (!factory) {
+      if (useThreaded) {
+        throw new Error("Stockfish not loaded. Make sure /lib/stockfish.js is included.");
+      }
       throw new Error(
-        "Stockfish not loaded. Make sure stockfish.js is included."
+        "Stockfish is not available on this device. " +
+          "Make sure /lib/stockfish.js defines window.StockfishMobile()."
       );
     }
 
-    const Stockfish = (
-      window as unknown as { Stockfish: () => Promise<StockfishEngine> }
-    ).Stockfish;
-    this.engine = await Stockfish();
+    this.engine = await factory();
 
     // Set up message listener
     this.messageListener = (line: string) => {
@@ -98,7 +128,7 @@ export class StockfishWorker {
     // Set engine options
     const {
       threads = 1,
-      hash = 16,
+      hash = supportsThreadedEngine() ? 16 : 8,
       multiPV = 1,
     } = options;
 

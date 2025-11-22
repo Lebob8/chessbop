@@ -2,6 +2,8 @@
 
 import type { EngineAnalysis } from "@/core/engine";
 
+export type EngineFlavor = "full-mt" | "full-st" | "lite-mt" | "lite-st" | "asm";
+
 interface EnginePanelProps {
   engineEnabled: boolean;
   onToggle: () => void | Promise<void>;
@@ -12,6 +14,8 @@ interface EnginePanelProps {
   showBestMove: boolean;
   onToggleBestMove: () => void;
   bestMoveLabel?: string;
+  flavor: EngineFlavor;
+  onChangeFlavor: (flavor: EngineFlavor) => void;
 }
 
 export default function EnginePanel({
@@ -24,7 +28,14 @@ export default function EnginePanel({
   showBestMove,
   onToggleBestMove,
   bestMoveLabel,
+  flavor,
+  onChangeFlavor,
 }: EnginePanelProps) {
+  const threadedSupported =
+    typeof SharedArrayBuffer !== "undefined" &&
+    typeof Atomics !== "undefined" &&
+    (globalThis as typeof globalThis & { crossOriginIsolated?: boolean })
+      .crossOriginIsolated === true;
   const formatEval = () => {
     if (!analysis.evaluation) return "—";
     const { cp, mate } = analysis.evaluation;
@@ -43,19 +54,40 @@ export default function EnginePanel({
 
   return (
     <div className="rounded-lg border border-white/10 bg-zinc-950/50 p-4">
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-zinc-200">Engine</h3>
-        <button
-          type="button"
-          onClick={onToggle}
-          className={`rounded px-2 py-1 text-xs font-medium ${
-            engineEnabled
-              ? "bg-green-600 text-white hover:bg-green-700"
-              : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
-          }`}
-        >
-          {engineEnabled ? "ON" : "OFF"}
-        </button>
+        <div className="flex items-center gap-2">
+          <label htmlFor="engine-flavor" className="hidden text-xs text-zinc-400 sm:block">
+            Flavor
+          </label>
+          <select
+            id="engine-flavor"
+            value={flavor}
+            onChange={(e) => onChangeFlavor(e.target.value as EngineFlavor)}
+            className="rounded border border-white/10 bg-zinc-900 px-2 py-1 text-xs text-zinc-300"
+          >
+            <option value="lite-mt" disabled={!threadedSupported}>
+              Lite (multi-threaded)
+            </option>
+            <option value="lite-st">Lite (single-threaded)</option>
+            <option value="full-mt" disabled={!threadedSupported}>
+              Full (multi-threaded)
+            </option>
+            <option value="full-st">Full (single-threaded)</option>
+            <option value="asm">ASM (very slow)</option>
+          </select>
+          <button
+            type="button"
+            onClick={onToggle}
+            className={`rounded px-2 py-1 text-xs font-medium ${
+              engineEnabled
+                ? "bg-green-600 text-white hover:bg-green-700"
+                : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
+            }`}
+          >
+            {engineEnabled ? "ON" : "OFF"}
+          </button>
+        </div>
       </div>
 
       {analysis.state === "loading" && (

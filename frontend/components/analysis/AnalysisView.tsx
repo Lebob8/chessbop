@@ -6,7 +6,7 @@ import ChessBoard from "@/components/ChessBoard";
 import { OpponentEngine, type OpponentConfig, useEngine } from "@/core/engine";
 import { Chess } from "chess.js";
 import { EvalBar } from "@/components/analysis/EvalBar";
-import EnginePanel from "@/components/analysis/EnginePanel";
+import EnginePanel, { type EngineFlavor } from "@/components/analysis/EnginePanel";
 import { PlayVsEngineControls } from "@/components/analysis/PlayVsEngineControls";
 import { FenPgnControls } from "@/components/analysis/FenPgnControls";
 import { GameOverBanner } from "@/components/analysis/GameOverBanner";
@@ -119,6 +119,14 @@ export default function AnalysisView() {
   const [engineEnabled, setEngineEnabled] = useState(true);
   const [analysisDepth, setAnalysisDepth] = useState(15);
   const [showBestMove, setShowBestMove] = useState(true);
+  const [engineFlavor, setEngineFlavor] = useState<EngineFlavor>(() => {
+    const hasSab =
+      typeof SharedArrayBuffer !== "undefined" &&
+      typeof Atomics !== "undefined" &&
+      (globalThis as typeof globalThis & { crossOriginIsolated?: boolean })
+        .crossOriginIsolated === true;
+    return hasSab ? "lite-mt" : "lite-st";
+  });
 
   // Board / user interaction state
   const [orientation, setOrientation] = useState<"white" | "black">("white");
@@ -204,6 +212,33 @@ export default function AnalysisView() {
     hintPulse: 0,
     showEngineTurnArrows,
   });
+
+  const applyEngineFlavor = useCallback((flavor: EngineFlavor) => {
+    if (typeof window === "undefined") return;
+    const hasSab =
+      typeof SharedArrayBuffer !== "undefined" &&
+      typeof Atomics !== "undefined" &&
+      (globalThis as typeof globalThis & { crossOriginIsolated?: boolean })
+        .crossOriginIsolated === true;
+    const w = window as unknown as {
+      CHESSBOP_STOCKFISH_CONFIG?: {
+        desktopFlavor?: EngineFlavor;
+        mobileFlavor?: EngineFlavor;
+      };
+    };
+    if (!w.CHESSBOP_STOCKFISH_CONFIG) {
+      w.CHESSBOP_STOCKFISH_CONFIG = {};
+    }
+    if (hasSab) {
+      w.CHESSBOP_STOCKFISH_CONFIG.desktopFlavor = flavor;
+    } else {
+      w.CHESSBOP_STOCKFISH_CONFIG.mobileFlavor = flavor;
+    }
+  }, []);
+
+  useEffect(() => {
+    applyEngineFlavor(engineFlavor);
+  }, [engineFlavor, applyEngineFlavor]);
 
   // Rebuild PGN export whenever the main line changes
   const pgnExport = useMemo(() => {
@@ -715,17 +750,41 @@ export default function AnalysisView() {
         />
 
         {/* Engine panel */}
-        <EnginePanel
-          engineEnabled={engineEnabled}
-          onToggle={toggleEngine}
-          analysis={analysis}
-          isAnalyzing={isAnalyzing}
-          analysisDepth={analysisDepth}
-          onChangeDepth={(d) => setAnalysisDepth(d)}
-          showBestMove={showBestMove}
-          onToggleBestMove={toggleBestMoveDisplay}
-          bestMoveLabel={bestMoveLabel}
-        />
+        {analysis.error && analysis.error.includes("SharedArrayBuffer") ? (
+          <div className="rounded-lg border border-yellow-500/30 bg-yellow-950/20 p-4">
+            <h3 className="mb-2 text-sm font-semibold text-yellow-400">
+              Engine Not Available on Mobile
+            </h3>
+            <p className="text-xs text-yellow-200/80">
+              The chess engine requires SharedArrayBuffer support, which is not available on most mobile browsers due to security restrictions.
+              You can still use the board to play moves, view the move list, and explore variations.
+            </p>
+            <p className="mt-2 text-xs text-yellow-200/60">
+              For full engine analysis, please use a desktop browser.
+            </p>
+          </div>
+          ) : (
+          <EnginePanel
+            engineEnabled={engineEnabled}
+            onToggle={toggleEngine}
+            analysis={analysis}
+            isAnalyzing={isAnalyzing}
+            analysisDepth={analysisDepth}
+            onChangeDepth={(d) => setAnalysisDepth(d)}
+            showBestMove={showBestMove}
+            onToggleBestMove={toggleBestMoveDisplay}
+            bestMoveLabel={bestMoveLabel}
+            flavor={engineFlavor}
+            onChangeFlavor={(flavor) => {
+              setEngineFlavor(flavor);
+              applyEngineFlavor(flavor);
+              if (engineEnabled) {
+                stop();
+                void start();
+              }
+            }}
+          />
+          )}
 
         {/* Move List panel */}
         <div className="rounded-lg border border-white/10 bg-zinc-950/50 p-4">
@@ -804,19 +863,21 @@ export default function AnalysisView() {
             </button>
           </div>
 
-          <PlayVsEngineControls
-            playVsEngine={playVsEngine}
-            onTogglePlayVsEngine={togglePlayVsEngine}
-            difficulty={difficulty}
-            onDifficultyChange={handleDifficultyChange}
-            showEngineTurnArrows={showEngineTurnArrows}
-            onToggleEngineTurnArrows={() =>
-              setShowEngineTurnArrows((prev) => !prev)
-            }
-            opponentReady={opponentReady}
-            opponentElo={opponentElo}
-            isUserTurn={isUserTurn}
-          />
+          {!(analysis.error && analysis.error.includes("SharedArrayBuffer")) && (
+            <PlayVsEngineControls
+              playVsEngine={playVsEngine}
+              onTogglePlayVsEngine={togglePlayVsEngine}
+              difficulty={difficulty}
+              onDifficultyChange={handleDifficultyChange}
+              showEngineTurnArrows={showEngineTurnArrows}
+              onToggleEngineTurnArrows={() =>
+                setShowEngineTurnArrows((prev) => !prev)
+              }
+              opponentReady={opponentReady}
+              opponentElo={opponentElo}
+              isUserTurn={isUserTurn}
+            />
+          )}
 
           <FenPgnControls
             currentFen={currentFen}

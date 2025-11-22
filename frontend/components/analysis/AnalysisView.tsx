@@ -161,6 +161,8 @@ export default function AnalysisView() {
   const mountedRef = useRef(true);
   const engineMoveTimeoutRef = useRef<number | null>(null);
   const lastEngineRequestRef = useRef<string | null>(null);
+  const boardContainerRef = useRef<HTMLDivElement>(null);
+  const [boardHeight, setBoardHeight] = useState(500);
   const { play, playMove } = useChessSounds();
 
   const { analysis, start, stop, analyze, isReady, isAnalyzing } = useEngine({
@@ -540,6 +542,28 @@ export default function AnalysisView() {
     analyze(currentFen, { depth: analysisDepth });
   }, [currentFen, engineEnabled, isReady, analysisDepth, analyze, treeVersion]);
 
+  // Track board container height for vertical eval bar
+  useEffect(() => {
+    const container = boardContainerRef.current;
+    if (!container) return;
+
+    const updateHeight = () => {
+      const rect = container.getBoundingClientRect();
+      setBoardHeight(rect.height);
+    };
+
+    updateHeight();
+
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(updateHeight);
+      ro.observe(container);
+      return () => ro.disconnect();
+    } else {
+      window.addEventListener("resize", updateHeight);
+      return () => window.removeEventListener("resize", updateHeight);
+    }
+  }, [boardKey, treeVersion]);
+
   // Accept external FEN via URL param (?fen=...)
   useEffect(() => {
     try {
@@ -641,7 +665,7 @@ export default function AnalysisView() {
     <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,700px)_minmax(260px,1fr)] lg:grid-cols-[minmax(0,800px)_minmax(320px,1fr)]">
       {/* Board area */}
       <section className="flex items-start justify-center gap-1">
-        <div className="rounded-lg border border-white/10 bg-zinc-950/50 p-3">
+        <div ref={boardContainerRef} className="w-full max-w-[500px] rounded-lg border border-white/10 bg-zinc-950/50 p-3">
           <ChessBoard
             key={boardKey}
             initialFen={currentFen}
@@ -661,7 +685,7 @@ export default function AnalysisView() {
             evalCp={analysis.evaluation?.cp}
             mate={analysis.evaluation?.mate}
             orientation="vertical"
-            heightPx={500}
+            heightPx={boardHeight}
             railWidthPx={20}
             showLabel={true}
           />

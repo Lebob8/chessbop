@@ -34,6 +34,8 @@ export function BoardEditor({
   const boardRef = useRef<HTMLDivElement>(null);
   const cgRef = useRef<Api | null>(null);
   const recentDragAtRef = useRef<number>(0);
+  const resizeObsRef = useRef<ResizeObserver | null>(null);
+  type ApiWithResize = Api & { resize?: () => void };
 
   // Init Chessground once
   useEffect(() => {
@@ -59,7 +61,41 @@ export function BoardEditor({
       },
     });
     cgRef.current = cg;
-    return () => cg.destroy();
+
+    // Ensure proper sizing at mount
+    try { (cg as ApiWithResize).resize?.(); } catch {}
+
+    // Observe container resize to keep board responsive
+    let winResizeHandler: (() => void) | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(() => {
+        try { (cg as ApiWithResize).resize?.(); } catch {}
+      });
+      ro.observe(boardRef.current);
+      resizeObsRef.current = ro;
+    } else {
+      const onWinResize = () => {
+        try { (cg as ApiWithResize).resize?.(); } catch {}
+      };
+      window.addEventListener("resize", onWinResize);
+      winResizeHandler = onWinResize;
+    }
+    return () => {
+      try {
+        if (resizeObsRef.current) {
+          resizeObsRef.current.disconnect();
+          resizeObsRef.current = null;
+        }
+      } catch {}
+      try {
+        if (winResizeHandler) {
+          window.removeEventListener("resize", winResizeHandler);
+          winResizeHandler = null;
+        }
+      } catch {}
+      cg.destroy();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orientation, onMove]);
 
   // Update FEN when prop changes
@@ -109,7 +145,13 @@ export function BoardEditor({
   return (
     <div
       ref={boardRef}
-      style={{ width, height, cursor: selectedTool === "move" ? "pointer" : "crosshair" }}
+      style={{
+        width: "100%",
+        aspectRatio: "1 / 1",
+        maxWidth: width,
+        maxHeight: height,
+        cursor: selectedTool === "move" ? "pointer" : "crosshair",
+      }}
       onClick={handleClick}
     />
   );

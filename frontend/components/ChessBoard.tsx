@@ -35,6 +35,8 @@ export default function ChessBoard({
   const bestMoveArrowRef = useRef(bestMoveArrow);
   const arrowsRef = useRef<BoardArrow[] | undefined>(arrows);
   const { playMove } = useChessSounds();
+  const resizeObsRef = useRef<ResizeObserver | null>(null);
+  type ApiWithResize = Api & { resize?: () => void };
 
   const applyArrows = (cg: Api) => {
     const activeArrows: BoardArrow[] = (() => {
@@ -137,7 +139,38 @@ export default function ChessBoard({
     cgRef.current = cg;
     applyArrows(cg);
 
+    // Ensure proper sizing at mount
+    try { (cg as ApiWithResize).resize?.(); } catch {}
+
+    // Observe container resize to keep board responsive
+    let winResizeHandler: (() => void) | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(() => {
+        try { (cg as ApiWithResize).resize?.(); } catch {}
+      });
+      ro.observe(boardRef.current);
+      resizeObsRef.current = ro;
+    } else {
+      const onWinResize = () => {
+        try { (cg as ApiWithResize).resize?.(); } catch {}
+      };
+      window.addEventListener("resize", onWinResize);
+      winResizeHandler = onWinResize;
+    }
+
     return () => {
+      try {
+        if (resizeObsRef.current) {
+          resizeObsRef.current.disconnect();
+          resizeObsRef.current = null;
+        }
+      } catch {}
+      try {
+        if (winResizeHandler) {
+          window.removeEventListener("resize", winResizeHandler);
+          winResizeHandler = null;
+        }
+      } catch {}
       cg.destroy();
     };
   }, [orientation, onMove, onMoveDetail, movable]);
@@ -194,8 +227,8 @@ export default function ChessBoard({
   }, [arrows]);
 
   return (
-    <div className="relative inline-block">
-      <div ref={boardRef} className="h-[500px] w-[500px]" />
+    <div className="relative inline-block w-full">
+      <div ref={boardRef} className="w-full aspect-square" />
     </div>
   );
 }
